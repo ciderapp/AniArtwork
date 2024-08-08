@@ -70,11 +70,17 @@ const processStream = async (url, key, jobId) => {
             .inputOptions('-protocol_whitelist file,http,https,tcp,tls,crypto')
             .output(gifPath)
             .outputOptions('-vf', 'fps=15,scale=500:-1:flags=lanczos')
+            .outputOptions('-threads', '24')
+            .outputOptions('-preset', 'fast')
             .on('start', (commandLine) => {
                 logger.info(`Job ${jobId}: FFmpeg started with command: ${commandLine}`);
             })
             .on('progress', (progress) => {
                 logger.info(`Job ${jobId}: Processing - ${JSON.stringify(progress)}`);
+            })
+            .on('error', (err) => {
+                logger.error(`Job ${jobId}: Error processing URL ${url} - ${err.message}`);
+                reject(err);
             })
             .on('end', () => {
                 logger.info(`Job ${jobId}: Processing completed for URL ${url}`);
