@@ -1,5 +1,5 @@
 # Use the latest Node.js image with Yarn pre-installed as a base
-FROM node:16-bullseye-slim
+FROM node:21-bullseye-slim
 
 # Set the working directory
 WORKDIR /usr/src/app
