@@ -76,9 +76,6 @@ const processStream = async (url, key, jobId) => {
             .on('progress', (progress) => {
                 logger.info(`Job ${jobId}: Processing - ${JSON.stringify(progress)}`);
             })
-            .on('stderr', (stderrLine) => {
-                logger.error(`Job ${jobId}: FFmpeg STDERR: ${stderrLine}`);
-            })
             .on('end', () => {
                 logger.info(`Job ${jobId}: Processing completed for URL ${url}`);
                 resolve(gifPath);
@@ -139,14 +136,14 @@ app.get('/artwork/generate', async (req, res) => {
 
     if (fs.existsSync(gifPath)) {
         logger.info(`Job ${jobId}: GIF already exists for URL ${url}`);
-        return res.status(200).json({ key, message: 'GIF already exists', url: `/artwork/${key}.gif` });
+        return res.status(200).json({ key, message: 'GIF already exists', url: `https://art.cider.sh/artwork/${key}.gif` });
     }
 
     processQueue.add({ url, key, jobId }).then((job) => {
         logger.info(`Job ${jobId}: Added to the queue for URL ${url}`);
         job.finished().then(() => {
             logger.info(`Job ${jobId}: GIF processing completed for URL ${url}`);
-            res.status(202).json({ key, message: 'GIF is being processed', url: `/artwork/${key}` });
+            res.status(202).json({ key, message: 'GIF is being processed', url: `https://art.cider.sh/artwork/${key}.gif` });
         }).catch((err) => {
             logger.error(`Job ${jobId}: Error finishing processing for URL ${url} - ${err.message}`);
             res.status(500).send('Error processing the stream');
@@ -191,5 +188,5 @@ const monitorStorage = () => {
 setInterval(monitorStorage, 60 * 60 * 1000);
 
 app.listen(port, () => {
-    logger.info(`Server is running on http://localhost:${port}`);
+    logger.info(`Server is running on http://art.cider.sh/`);
 });
