@@ -5,10 +5,7 @@ FROM node:22-alpine
 WORKDIR /usr/src/app
 
 # Install FFmpeg
-RUN apt-get update && \
-    apt-get install -y ffmpeg make gcc g++ python3 && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+RUN apk add --update-cache ffmpeg make gcc g++ python3
 
 # Copy package.json and yarn.lock
 COPY package.json yarn.lock ./
