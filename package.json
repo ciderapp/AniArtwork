@@ -1,10 +1,9 @@
 {
   "name": "aniart",
-  "packageManager": "yarn@4.2.2",
   "main": "server.mjs",
   "type": "module",
   "scripts": {
-    "start": "bun server.mjs"
+    "start": "node server.mjs"
   },
   "dependencies": {
     "bull": "^4.16.0",
@@ -13,5 +12,6 @@
     "fluent-ffmpeg": "^2.1.3",
     "node-fetch": "^3.3.2",
     "winston": "^3.14.0"
-  }
+  },
+  "packageManager": "yarn@4.4.0"
 }

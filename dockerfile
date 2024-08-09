@@ -1,8 +1,8 @@
 # Use the latest Node.js image with Yarn pre-installed as a base
-FROM oven/bun:canary-alpine
+FROM node:18-alpine
 
 # Set the working directory
-WORKDIR /usr/src/app
+WORKDIR /app
 
 # Install FFmpeg
 RUN apk add --update-cache ffmpeg make gcc g++ python3
@@ -11,7 +11,7 @@ RUN apk add --update-cache ffmpeg make gcc g++ python3
 COPY package.json yarn.lock ./
 
 # Install dependencies using Yarn
-RUN bun install
+RUN npm install
 
 # Copy the rest of the application code
 COPY . .
@@ -20,4 +20,4 @@ COPY . .
 EXPOSE 3000
 
 # Define the command to run the application
-CMD ["bun", "start"]
+CMD ["node", "server.mjs"]
