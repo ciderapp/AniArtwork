@@ -3,7 +3,7 @@
   "main": "server.mjs",
   "type": "module",
   "scripts": {
-    "start": "bun server.mjs"
+    "start": "node server.mjs"
   },
   "dependencies": {
     "bull": "^4.16.0",
