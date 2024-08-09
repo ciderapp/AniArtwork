@@ -4,7 +4,7 @@
   "main": "server.mjs",
   "type": "module",
   "scripts": {
-    "start": "node server.mjs"
+    "start": "bun server.mjs"
   },
   "dependencies": {
     "bull": "^4.16.0",
