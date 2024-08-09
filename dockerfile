@@ -1,20 +1,17 @@
 # Use the latest Node.js image with Yarn pre-installed as a base
-FROM node:21-bullseye-slim
+FROM oven/bun:canary-alpine
 
 # Set the working directory
 WORKDIR /usr/src/app
 
 # Install FFmpeg
-RUN apt-get update && \
-    apt-get install -y ffmpeg make gcc g++ python3 && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+RUN apk add --update-cache ffmpeg make gcc g++ python3
 
 # Copy package.json and yarn.lock
 COPY package.json yarn.lock ./
 
 # Install dependencies using Yarn
-RUN yarn install
+RUN bun install
 
 # Copy the rest of the application code
 COPY . .
