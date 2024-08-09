@@ -3,7 +3,6 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 import crypto from 'crypto';
 import Queue from 'bull';
-import diskusage from 'diskusage';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -72,6 +71,7 @@ const processStream = async (url, key, jobId) => {
             .outputOptions('-vf', 'fps=15,scale=500:-1:flags=lanczos')
             .outputOptions('-threads', '24')
             .outputOptions('-preset', 'fast')
+            .outputOptions('-hwaccel', 'nvenc')
             .on('start', (commandLine) => {
                 logger.info(`Job ${jobId}: FFmpeg started with command: ${commandLine}`);
             })
@@ -173,25 +173,6 @@ app.get('/artwork/:key.gif', (req, res) => {
         return res.status(404).send('GIF not found');
     }
 });
-
-// Function to monitor and manage storage
-const monitorStorage = () => {
-    diskusage.check(cacheDir, (err, info) => {
-        if (err) {
-            logger.error('Error checking disk usage:', err);
-            return;
-        }
-
-        if (info.available < MAX_STORAGE) {
-            logger.info('Clearing cache directory due to storage limit');
-            fs.rmdirSync(cacheDir, { recursive: true });
-            fs.mkdirSync(cacheDir);
-        }
-    });
-};
-
-// Schedule storage monitoring every hour
-setInterval(monitorStorage, 60 * 60 * 1000);
 
 app.listen(port, () => {
     logger.info(`Server is running on http://art.cider.sh/`);
