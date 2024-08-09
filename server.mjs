@@ -21,7 +21,7 @@ const port = 3000;
 const cacheDir = path.join(__dirname, 'cache');
 
 // Ensure cache directory exists
-fs.mkdir(cacheDir, { recursive: true }).catch(err => logger.error(`Error creating cache directory: ${err.message}`));
+fsSync.mkdir(cacheDir, { recursive: true }).catch(err => logger.error(`Error creating cache directory: ${err.message}`));
 
 // Configure logging
 const logger = winston.createLogger({
