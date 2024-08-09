@@ -10,11 +10,8 @@ RUN apk add --update-cache ffmpeg make gcc g++ python3
 # Copy package.json and yarn.lock
 COPY package.json yarn.lock ./
 
-# Enable Corepack
-RUN corepack enable
-
 # Install dependencies using Yarn
-RUN yarn install
+RUN npm install
 
 # Copy the rest of the application code
 COPY . .
