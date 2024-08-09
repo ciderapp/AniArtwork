@@ -71,7 +71,6 @@ const processStream = async (url, key, jobId) => {
             .outputOptions('-vf', 'fps=15,scale=500:-1:flags=lanczos')
             .outputOptions('-threads', '24')
             .outputOptions('-preset', 'fast')
-            .outputOptions('-hwaccel', 'nvenc')
             .on('start', (commandLine) => {
                 logger.info(`Job ${jobId}: FFmpeg started with command: ${commandLine}`);
             })
