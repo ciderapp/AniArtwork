@@ -69,7 +69,7 @@ const processStream = async (url, key, jobId) => {
             .inputOptions('-protocol_whitelist file,http,https,tcp,tls,crypto')
             .output(gifPath)
             .outputOptions('-vf', 'fps=15,scale=500:-1:flags=lanczos')
-            .outputOptions('-threads', '24')
+            .outputOptions('-threads', '8')
             .outputOptions('-preset', 'fast')
             .outputOptions('-multiple_requests', '1')
             .outputOptions('-buffer_size', '8192k')
@@ -96,7 +96,7 @@ const processStream = async (url, key, jobId) => {
 };
 
 // Process job queue
-processQueue.process(async (job) => {
+processQueue.process(3, async (job) => {
     const { url, key, jobId } = job.data;
     const gifPath = path.join(cacheDir, `${key}.gif`);
 
