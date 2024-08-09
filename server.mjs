@@ -123,6 +123,12 @@ app.get('/artwork/generate', async (req, res) => {
     if (!url) {
         return res.status(400).send('URL query parameter is required');
     }
+    
+    const parsedUrl = new URL(url);
+    if (parsedUrl.hostname !== 'mvod.itunes.apple.com') {
+        logger.warn(`Invalid domain: ${parsedUrl.hostname}`);
+        return res.status(400).send('Only URLs from mvod.itunes.apple.com are allowed');
+    }
 
     try {
         const response = await fetch(url);
