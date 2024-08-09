@@ -4,7 +4,8 @@ const require = createRequire(import.meta.url);
 import crypto from 'crypto';
 import Queue from 'bull';
 import path from 'path';
-import fs from 'fs/promises'; // Use the promises API for async operations
+import fsSync from 'fs/promises'; // Use the promises API for async operations
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import winston from 'winston';
 import { promisify } from 'util';
@@ -49,14 +50,14 @@ const validateGIF = async (gifPath) => {
 const cleanCache = async () => {
     logger.info('Starting cache cleanup...');
     try {
-        const files = (await fs.readdir(cacheDir)).filter(file => file.endsWith('.gif'));
+        const files = (await fsSync.readdir(cacheDir)).filter(file => file.endsWith('.gif'));
 
         for (const file of files) {
             const filePath = path.join(cacheDir, file);
             const isValid = await validateGIF(filePath);
             if (!isValid) {
                 logger.warn(`Invalid GIF found and removed: ${file}`);
-                await fs.unlink(filePath);
+                await fsSync.unlink(filePath);
             } else {
                 logger.info(`Valid GIF: ${file}`);
             }
