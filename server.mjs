@@ -27,12 +27,13 @@ fsSync.mkdir(cacheDir, { recursive: true }).catch(err => logger.error(`Error cre
 const logger = winston.createLogger({
     level: 'info',
     format: winston.format.combine(
+        winston.format.colorize(),
         winston.format.timestamp(),
         winston.format.printf(({ timestamp, level, message }) => `${timestamp} ${level}: ${message}`)
     ),
     transports: [
         new winston.transports.Console(),
-        new winston.transports.File({ filename: 'server.log' })
+        new winston.transports.File({ filename: 'server.log', format: winston.format.uncolorize() })
     ]
 });
 
@@ -178,10 +179,10 @@ app.get('/artwork/generate', async (req, res) => {
     const gifPath = path.join(cacheDir, `${key}.gif`);
     const jobId = crypto.randomBytes(4).toString('hex');
 
-    logger.info(`Job ${jobId}: Received request to generate GIF for URL ${url}`);
+    logger.info(`Job ${jobId}: Received to generate GIF for URL ${url}`);
 
     if (fs.existsSync(gifPath)) {
-        logger.info(`Job ${jobId}: GIF already exists for URL ${url}`);
+        logger.info(`Job ${jobId}: Served existing GIF on URL https://art.cider.sh/artwork/${key}.gif`);
         return res.status(200).json({ key, message: 'GIF already exists', url: `https://art.cider.sh/artwork/${key}.gif` });
     }
 
