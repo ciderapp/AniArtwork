@@ -16,7 +16,6 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = 3000;
 const cacheDir = path.join(__dirname, 'cache');
-const MAX_STORAGE = 100 * 1024 * 1024 * 1024; // 100GB
 
 // Ensure cache directory exists
 if (!fs.existsSync(cacheDir)) {
@@ -78,10 +77,6 @@ const processStream = async (url, key, jobId) => {
             })
             .on('progress', (progress) => {
                 logger.info(`Job ${jobId}: Processing - ${JSON.stringify(progress)}`);
-            })
-            .on('error', (err) => {
-                logger.error(`Job ${jobId}: Error processing URL ${url} - ${err.message}`);
-                reject(err);
             })
             .on('end', () => {
                 logger.info(`Job ${jobId}: Processing completed for URL ${url}`);
