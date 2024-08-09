@@ -7,9 +7,6 @@ WORKDIR /usr/src/app
 # Install FFmpeg
 RUN apk add --update-cache ffmpeg make gcc g++ python3
 
-# Enable Corepack
-RUN corepack enable
-
 # Copy package.json and yarn.lock
 COPY package.json yarn.lock ./
 
