@@ -4,11 +4,13 @@ const require = createRequire(import.meta.url);
 import crypto from 'crypto';
 import Queue from 'bull';
 import path from 'path';
-import fs from 'fs';
+import fs from 'fs/promises'; // Use the promises API for async operations
 import { fileURLToPath } from 'url';
 import winston from 'winston';
+import { promisify } from 'util';
 const ffmpeg = require('fluent-ffmpeg');
 const { default: fetch } = await import('node-fetch');
+const exec = promisify(require('child_process').exec);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,9 +20,7 @@ const port = 3000;
 const cacheDir = path.join(__dirname, 'cache');
 
 // Ensure cache directory exists
-if (!fs.existsSync(cacheDir)) {
-    fs.mkdirSync(cacheDir);
-}
+fs.mkdir(cacheDir, { recursive: true }).catch(err => logger.error(`Error creating cache directory: ${err.message}`));
 
 // Configure logging
 const logger = winston.createLogger({
@@ -33,6 +33,43 @@ const logger = winston.createLogger({
         new winston.transports.Console(),
         new winston.transports.File({ filename: 'server.log' })
     ]
+});
+
+// Function to validate GIF files
+const validateGIF = async (gifPath) => {
+    try {
+        await exec(`ffmpeg -v error -i ${gifPath} -f null -`);
+        return true;
+    } catch (error) {
+        return false;
+    }
+};
+
+// Function to clean invalid GIFs from cache
+const cleanCache = async () => {
+    logger.info('Starting cache cleanup...');
+    try {
+        const files = (await fs.readdir(cacheDir)).filter(file => file.endsWith('.gif'));
+
+        for (const file of files) {
+            const filePath = path.join(cacheDir, file);
+            const isValid = await validateGIF(filePath);
+            if (!isValid) {
+                logger.warn(`Invalid GIF found and removed: ${file}`);
+                await fs.unlink(filePath);
+            } else {
+                logger.info(`Valid GIF: ${file}`);
+            }
+        }
+        logger.info('Cache cleanup completed.');
+    } catch (err) {
+        logger.error(`Cache cleanup error: ${err.message}`);
+    }
+};
+
+// Perform cache cleanup on server startup
+cleanCache().catch(err => {
+    logger.error(`Cache cleanup error: ${err.message}`);
 });
 
 // Job queue for processing streams
