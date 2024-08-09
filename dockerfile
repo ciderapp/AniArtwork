@@ -1,5 +1,5 @@
 # Use the latest Node.js image with Yarn pre-installed as a base
-FROM node:22-alpine
+FROM node:18-alpine
 
 # Set the working directory
 WORKDIR /usr/src/app
