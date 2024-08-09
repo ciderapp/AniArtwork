@@ -1,5 +1,5 @@
 # Use the latest Node.js image with Yarn pre-installed as a base
-FROM node:22-alpine
+FROM oven/bun:canary-alpine
 
 # Set the working directory
 WORKDIR /usr/src/app
@@ -14,7 +14,7 @@ RUN corepack enable
 COPY package.json yarn.lock ./
 
 # Install dependencies using Yarn
-RUN yarn install
+RUN bun install
 
 # Copy the rest of the application code
 COPY . .
