@@ -202,7 +202,7 @@ app.get('/artwork/generate', async (req, res) => {
 
             res.setHeader('Cache-Control', `public, max-age=${sevenDaysInSeconds}`);
             res.setHeader('Expires', expiresDate);
-            
+
             logger.info(`Job ${jobId}: GIF processing completed for URL ${url}`);
             res.status(202).json({ key, message: 'GIF is being processed', url: `https://art.cider.sh/artwork/${key}.gif` });
         }).catch((err) => {
@@ -220,14 +220,14 @@ app.get('/artwork/:key.gif', (req, res) => {
     const key = req.params.key;
     const gifPath = path.join(cacheDir, `${key}.gif`);
 
-    // Set cache headers for Cloudflare
-    const sevenDaysInSeconds = 7 * 24 * 60 * 60;
-    const expiresDate = new Date(Date.now() + sevenDaysInSeconds * 1000).toUTCString();
-
-    res.setHeader('Cache-Control', `public, max-age=${sevenDaysInSeconds}`);
-    res.setHeader('Expires', expiresDate);
-
     if (fs.existsSync(gifPath)) {
+        // Set cache headers for Cloudflare
+        const sevenDaysInSeconds = 7 * 24 * 60 * 60;
+        const expiresDate = new Date(Date.now() + sevenDaysInSeconds * 1000).toUTCString();
+
+        res.setHeader('Cache-Control', `public, max-age=${sevenDaysInSeconds}`);
+        res.setHeader('Expires', expiresDate);
+        
         logger.info(`Retrieving GIF for key ${key}`);
         return res.sendFile(gifPath);
     } else {
