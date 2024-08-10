@@ -182,6 +182,13 @@ app.get('/artwork/generate', async (req, res) => {
     logger.info(`Job ${jobId}: Received to generate GIF for URL ${url}`);
 
     if (fs.existsSync(gifPath)) {
+        // Set cache headers for Cloudflare
+        const sevenDaysInSeconds = 7 * 24 * 60 * 60;
+        const expiresDate = new Date(Date.now() + sevenDaysInSeconds * 1000).toUTCString();
+
+        res.setHeader('Cache-Control', `public, max-age=${sevenDaysInSeconds}`);
+        res.setHeader('Expires', expiresDate);
+
         logger.info(`Job ${jobId}: Served existing GIF on URL https://art.cider.sh/artwork/${key}.gif`);
         return res.status(200).json({ key, message: 'GIF already exists', url: `https://art.cider.sh/artwork/${key}.gif` });
     }
@@ -189,6 +196,13 @@ app.get('/artwork/generate', async (req, res) => {
     processQueue.add({ url, key, jobId }).then((job) => {
         logger.info(`Job ${jobId}: Added to the queue for URL ${url}`);
         job.finished().then(() => {
+            // Set cache headers for Cloudflare
+            const sevenDaysInSeconds = 7 * 24 * 60 * 60;
+            const expiresDate = new Date(Date.now() + sevenDaysInSeconds * 1000).toUTCString();
+
+            res.setHeader('Cache-Control', `public, max-age=${sevenDaysInSeconds}`);
+            res.setHeader('Expires', expiresDate);
+            
             logger.info(`Job ${jobId}: GIF processing completed for URL ${url}`);
             res.status(202).json({ key, message: 'GIF is being processed', url: `https://art.cider.sh/artwork/${key}.gif` });
         }).catch((err) => {
@@ -205,6 +219,13 @@ app.get('/artwork/generate', async (req, res) => {
 app.get('/artwork/:key.gif', (req, res) => {
     const key = req.params.key;
     const gifPath = path.join(cacheDir, `${key}.gif`);
+
+    // Set cache headers for Cloudflare
+    const sevenDaysInSeconds = 7 * 24 * 60 * 60;
+    const expiresDate = new Date(Date.now() + sevenDaysInSeconds * 1000).toUTCString();
+
+    res.setHeader('Cache-Control', `public, max-age=${sevenDaysInSeconds}`);
+    res.setHeader('Expires', expiresDate);
 
     if (fs.existsSync(gifPath)) {
         logger.info(`Retrieving GIF for key ${key}`);
