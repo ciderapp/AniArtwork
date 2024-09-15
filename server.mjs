@@ -1,3 +1,7 @@
+// ============================================================================
+//  IMPORTS AND SETUP
+// ============================================================================
+
 import express from 'express';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
@@ -5,7 +9,7 @@ import crypto from 'crypto';
 import Queue from 'bull';
 import path from 'path';
 import sharp from 'sharp';
-import fsSync from 'fs/promises'; // Use the promises API for async operations
+import fsSync from 'fs/promises';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import winston from 'winston';
@@ -19,21 +23,28 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = 3000;
+
+// ============================================================================
+//  DIRECTORY SETUP
+// ============================================================================
+
 const cacheDir = path.join(__dirname, 'cache');
-const artistSquaresDir = path.join(__dirname, 'cache', 'artist-squares');
-const icloudArtDir = path.join(__dirname, 'cache', 'icloud-art');
+const artistSquaresDir = path.join(cacheDir, 'artist-squares');
+const icloudArtDir = path.join(cacheDir, 'icloud-art');
+const animatedArtDir = path.join(cacheDir, 'animated-art');
 
-// Ensure cache directory exists
-fsSync.mkdir(cacheDir, { recursive: true }).catch(err => logger.error(`Error creating cache directory: ${err.message}`));
+const ensureDirectories = async () => {
+    const directories = [cacheDir, artistSquaresDir, icloudArtDir, animatedArtDir];
+    for (const dir of directories) {
+        await fsSync.mkdir(dir, { recursive: true })
+            .catch(err => logger.error(`Error creating directory ${dir}: ${err.message}`));
+    }
+};
 
-// Ensure artist squares directory exists
-fsSync.mkdir(artistSquaresDir, { recursive: true }).catch(err => logger.error(`Error creating artist squares directory: ${err.message}`));
+// ============================================================================
+//  LOGGING SETUP
+// ============================================================================
 
-// Ensure iCloud Art directory exists
-fsSync.mkdir(icloudArtDir, { recursive: true }).catch(err => logger.error(`Error creating iCloud Art directory: ${err.message}`));
-
-
-// Configure logging
 const logger = winston.createLogger({
     level: 'info',
     format: winston.format.combine(
@@ -47,7 +58,10 @@ const logger = winston.createLogger({
     ]
 });
 
-// Function to validate GIF files
+// ============================================================================
+//  UTILITY FUNCTIONS
+// ============================================================================
+
 const validateGIF = async (gifPath) => {
     try {
         await exec(`ffmpeg -v error -i ${gifPath} -f null -`);
@@ -57,41 +71,43 @@ const validateGIF = async (gifPath) => {
     }
 };
 
-// Function to clean invalid GIFs from cache
-const cleanCache = async () => {
-    logger.info('Starting cache cleanup...');
+const generateKey = (url) => crypto.createHash('md5').update(url).digest('hex');
+
+const cleanAndMigrateCache = async () => {
+    logger.info('Starting cache cleanup and migration...');
     try {
         const files = (await fsSync.readdir(cacheDir)).filter(file => file.endsWith('.gif'));
 
         for (const file of files) {
-            const filePath = path.join(cacheDir, file);
-            const isValid = await validateGIF(filePath);
+            const oldPath = path.join(cacheDir, file);
+            const newPath = path.join(animatedArtDir, file);
+            const isValid = await validateGIF(oldPath);
             if (!isValid) {
                 logger.warn(`Invalid GIF found and removed: ${file}`);
-                await fsSync.unlink(filePath);
+                await fsSync.unlink(oldPath);
             } else {
                 logger.info(`Valid GIF: ${file}`);
+                await fsSync.rename(oldPath, newPath);
+                logger.info(`Migrated GIF to new directory: ${file}`);
             }
         }
-        logger.info('Cache cleanup completed.');
+        logger.info('Cache cleanup and migration completed.');
     } catch (err) {
-        logger.error(`Cache cleanup error: ${err.message}`);
+        logger.error(`Cache cleanup and migration error: ${err.message}`);
     }
 };
 
-// Perform cache cleanup on server startup
-cleanCache().catch(err => {
-    logger.error(`Cache cleanup error: ${err.message}`);
-});
+// ============================================================================
+//  QUEUE SETUP
+// ============================================================================
 
-// Job queue for processing streams
 const processQueue = new Queue('processQueue', {
     redis: {
-        host: '10.10.79.15', // change this if your Redis server is hosted elsewhere
+        host: '10.10.79.15',
         port: 6379
     },
     limiter: {
-        max: 5, // Maximum 5 concurrent jobs
+        max: 5,
         duration: 1000
     }
 });
@@ -104,18 +120,19 @@ processQueue.on('failed', (job, err) => {
     logger.error(`Job ${job.id} failed: ${err.message}`);
 });
 
-// Function to generate a unique key based on the URL
-const generateKey = (url) => crypto.createHash('md5').update(url).digest('hex');
+// ============================================================================
+//  STREAM PROCESSING
+// ============================================================================
 
-// Function to process the m3u8 stream and save as GIF
 const processStream = async (url, key, jobId) => {
     logger.info(`Job ${jobId}: Starting processing for URL ${url}`);
     return new Promise((resolve, reject) => {
-        const gifPath = path.join(cacheDir, `${key}.gif`);
+        const tempGifPath = path.join(animatedArtDir, `${key}_temp.gif`);
+        const finalGifPath = path.join(animatedArtDir, `${key}.gif`);
 
         ffmpeg(url)
             .inputOptions('-protocol_whitelist file,http,https,tcp,tls,crypto')
-            .output(gifPath)
+            .output(tempGifPath)
             .outputOptions('-vf', 'fps=15,scale=500:-1:flags=lanczos')
             .outputOptions('-threads', '8')
             .outputOptions('-preset', 'fast')
@@ -127,27 +144,38 @@ const processStream = async (url, key, jobId) => {
             .on('progress', (progress) => {
                 logger.info(`Job ${jobId}: Processing - ${JSON.stringify(progress)}`);
             })
-            .on('end', () => {
+            .on('end', async () => {
                 logger.info(`Job ${jobId}: Processing completed for URL ${url}`);
-                resolve(gifPath);
+                try {
+                    const stats = await fsSync.stat(tempGifPath);
+                    if (stats.size > 0) {
+                        await fsSync.rename(tempGifPath, finalGifPath);
+                        resolve(finalGifPath);
+                    } else {
+                        throw new Error('Generated GIF file is empty');
+                    }
+                } catch (error) {
+                    await fsSync.unlink(tempGifPath).catch(err => logger.warn(`Failed to delete temporary file: ${err.message}`));
+                    reject(error);
+                }
             })
-            .on('error', (err) => {
+            .on('error', async (err) => {
                 logger.error(`Job ${jobId}: Error processing URL ${url} - ${err.message}`);
+                await fsSync.unlink(tempGifPath).catch(err => logger.warn(`Failed to delete temporary file: ${err.message}`));
                 reject(err);
             })
             .run();
     });
 };
 
-// Process job queue
 processQueue.process(3, async (job) => {
     const { url, key, jobId } = job.data;
-    const gifPath = path.join(cacheDir, `${key}.gif`);
+    const gifPath = path.join(animatedArtDir, `${key}.gif`);
 
     logger.info(`Job ${jobId}: Starting job for URL ${url}`);
 
     if (fs.existsSync(gifPath)) {
-        logger.info(`Job ${jobId}: GIF already exists for URL ${url}.gif`);
+        logger.info(`Job ${jobId}: GIF already exists for URL ${url}`);
         return gifPath;
     }
 
@@ -161,7 +189,10 @@ processQueue.process(3, async (job) => {
     }
 });
 
-// Route to generate GIF
+// ============================================================================
+//  ROUTES
+// ============================================================================
+
 app.get('/artwork/generate', async (req, res) => {
     const url = req.query.url;
     if (!url) {
@@ -186,13 +217,12 @@ app.get('/artwork/generate', async (req, res) => {
     }
 
     const key = generateKey(url);
-    const gifPath = path.join(cacheDir, `${key}.gif`);
+    const gifPath = path.join(animatedArtDir, `${key}.gif`);
     const jobId = crypto.randomBytes(4).toString('hex');
 
     logger.info(`Job ${jobId}: Received to generate GIF for URL ${url}`);
 
     if (fs.existsSync(gifPath)) {
-        // Set cache headers for Cloudflare
         const sevenDaysInSeconds = 7 * 24 * 60 * 60;
         const expiresDate = new Date(Date.now() + sevenDaysInSeconds * 1000).toUTCString();
 
@@ -206,7 +236,6 @@ app.get('/artwork/generate', async (req, res) => {
     processQueue.add({ url, key, jobId }).then((job) => {
         logger.info(`Job ${jobId}: Added to the queue for URL ${url}`);
         job.finished().then(() => {
-            // Set cache headers for Cloudflare
             const sevenDaysInSeconds = 7 * 24 * 60 * 60;
             const expiresDate = new Date(Date.now() + sevenDaysInSeconds * 1000).toUTCString();
 
@@ -225,13 +254,11 @@ app.get('/artwork/generate', async (req, res) => {
     });
 });
 
-// Route to retrieve GIF
 app.get('/artwork/:key.gif', (req, res) => {
     const key = req.params.key;
-    const gifPath = path.join(cacheDir, `${key}.gif`);
+    const gifPath = path.join(animatedArtDir, `${key}.gif`);
 
     if (fs.existsSync(gifPath)) {
-        // Set cache headers for Cloudflare
         const sevenDaysInSeconds = 7 * 24 * 60 * 60;
         const expiresDate = new Date(Date.now() + sevenDaysInSeconds * 1000).toUTCString();
 
@@ -245,6 +272,10 @@ app.get('/artwork/:key.gif', (req, res) => {
         return res.status(404).send('GIF not found');
     }
 });
+
+// ============================================================================
+//  ARTIST SQUARE PROCESSING
+// ============================================================================
 
 const artistSquareQueue = new Queue('artistSquareQueue', {
     redis: {
@@ -265,63 +296,58 @@ artistSquareQueue.on('failed', (job, err) => {
     logger.error(`Artist Square Job ${job.id} failed: ${err.message}`);
 });
 
-// Function to generate a unique key for artist square
 const generateArtistSquareKey = (imageUrls) => {
     const combinedUrls = imageUrls.sort().join('');
     return crypto.createHash('md5').update(combinedUrls).digest('hex');
 };
 
-// Function to create artist square
 const createArtistSquare = async (imageUrls) => {
-    const size = 500; // Size of the final square image
+    const size = 500;
     const images = await Promise.all(imageUrls.map(async url => {
-      const response = await fetch(url);
-      const arrayBuffer = await response.arrayBuffer();
-      return sharp(Buffer.from(arrayBuffer))
-        .resize(size, size, { fit: 'cover' })
-        .toBuffer();
+        const response = await fetch(url);
+        const arrayBuffer = await response.arrayBuffer();
+        return sharp(Buffer.from(arrayBuffer))
+            .resize(size, size, { fit: 'cover' })
+            .toBuffer();
     }));
-  
+
     let composite;
     const background = { r: 0, g: 0, b: 0, alpha: 1 };
-  
+
     if (images.length === 2) {
-      composite = sharp({
-        create: { width: size, height: size, channels: 4, background }
-      })
-      .composite([
-        { input: await sharp(images[0]).resize(size / 2, size).toBuffer(), top: 0, left: 0 },
-        { input: await sharp(images[1]).resize(size / 2, size).toBuffer(), top: 0, left: size / 2 }
-      ]);
+        composite = sharp({
+            create: { width: size, height: size, channels: 4, background }
+        })
+        .composite([
+            { input: await sharp(images[0]).resize(size / 2, size).toBuffer(), top: 0, left: 0 },
+            { input: await sharp(images[1]).resize(size / 2, size).toBuffer(), top: 0, left: size / 2 }
+        ]);
     } else if (images.length === 3) {
-      composite = sharp({
-        create: { width: size, height: size, channels: 4, background }
-      })
-      .composite([
-        // Primary artist at the top
-        { input: await sharp(images[0]).resize(size, size / 2).toBuffer(), top: 0, left: 0 },
-        // Secondary artists split at the bottom
-        { input: await sharp(images[1]).resize(size / 2, size / 2).toBuffer(), top: size / 2, left: 0 },
-        { input: await sharp(images[2]).resize(size / 2, size / 2).toBuffer(), top: size / 2, left: size / 2 }
-      ]);
+        composite = sharp({
+            create: { width: size, height: size, channels: 4, background }
+        })
+        .composite([
+            { input: await sharp(images[0]).resize(size, size / 2).toBuffer(), top: 0, left: 0 },
+            { input: await sharp(images[1]).resize(size / 2, size / 2).toBuffer(), top: size / 2, left: 0 },
+            { input: await sharp(images[2]).resize(size / 2, size / 2).toBuffer(), top: size / 2, left: size / 2 }
+        ]);
     } else if (images.length === 4) {
-      composite = sharp({
-        create: { width: size, height: size, channels: 4, background }
-      })
-      .composite([
-        { input: await sharp(images[0]).resize(size / 2, size / 2).toBuffer(), top: 0, left: 0 },
-        { input: await sharp(images[1]).resize(size / 2, size / 2).toBuffer(), top: 0, left: size / 2 },
-        { input: await sharp(images[2]).resize(size / 2, size / 2).toBuffer(), top: size / 2, left: 0 },
-        { input: await sharp(images[3]).resize(size / 2, size / 2).toBuffer(), top: size / 2, left: size / 2 }
-      ]);
+        composite = sharp({
+            create: { width: size, height: size, channels: 4, background }
+        })
+        .composite([
+            { input: await sharp(images[0]).resize(size / 2, size / 2).toBuffer(), top: 0, left: 0 },
+            { input: await sharp(images[1]).resize(size / 2, size / 2).toBuffer(), top: 0, left: size / 2 },
+            { input: await sharp(images[2]).resize(size / 2, size / 2).toBuffer(), top: size / 2, left: 0 },
+            { input: await sharp(images[3]).resize(size / 2, size / 2).toBuffer(), top: size / 2, left: size / 2 }
+        ]);
     } else {
-      throw new Error('Invalid number of images. Must be 2, 3, or 4.');
+        throw new Error('Invalid number of images. Must be 2, 3, or 4.');
     }
-  
+
     return composite.jpeg().toBuffer();
 };
 
-// Process job queue for artist squares
 artistSquareQueue.process(3, async (job) => {
     const { imageUrls, key, jobId } = job.data;
     const squarePath = path.join(artistSquaresDir, `${key}.jpg`);
@@ -344,13 +370,11 @@ artistSquareQueue.process(3, async (job) => {
     }
 });
 
-
-// Artist Square Post
 app.post('/artwork/artist-square', express.json(), async (req, res) => {
     const imageUrls = req.body.imageUrls;
     
     if (!Array.isArray(imageUrls) || imageUrls.length < 2 || imageUrls.length > 4) {
-      return res.status(400).send('Invalid input. Provide 2-4 image URLs.');
+        return res.status(400).send('Invalid input. Provide 2-4 image URLs.');
     }
   
     const key = generateArtistSquareKey(imageUrls);
@@ -358,54 +382,55 @@ app.post('/artwork/artist-square', express.json(), async (req, res) => {
     const jobId = crypto.randomBytes(4).toString('hex');
   
     if (fs.existsSync(squarePath)) {
-      logger.info(`Job ${jobId}: Artist square already exists for key ${key}`);
-      return res.status(200).json({ key, message: 'Artist square already exists', url: `https://art.cider.sh/artwork/artist-square/${key}.jpg` });
+        logger.info(`Job ${jobId}: Artist square already exists for key ${key}`);
+        return res.status(200).json({ key, message: 'Artist square already exists', url: `https://art.cider.sh/artwork/artist-square/${key}.jpg` });
     }
   
     try {
-      const job = await artistSquareQueue.add({ imageUrls, key, jobId });
-      logger.info(`Job ${jobId}: Added to the artist square queue`);
+        const job = await artistSquareQueue.add({ imageUrls, key, jobId });
+        logger.info(`Job ${jobId}: Added to the artist square queue`);
   
-      job.finished().then(() => {
-        // Set cache headers for Cloudflare
-        const sevenDaysInSeconds = 7 * 24 * 60 * 60;
-        const expiresDate = new Date(Date.now() + sevenDaysInSeconds * 1000).toUTCString();
+        job.finished().then(() => {
+            const sevenDaysInSeconds = 7 * 24 * 60 * 60;
+            const expiresDate = new Date(Date.now() + sevenDaysInSeconds * 1000).toUTCString();
   
-        res.setHeader('Cache-Control', `public, max-age=${sevenDaysInSeconds}`);
-        res.setHeader('Expires', expiresDate);
+            res.setHeader('Cache-Control', `public, max-age=${sevenDaysInSeconds}`);
+            res.setHeader('Expires', expiresDate);
   
-        logger.info(`Job ${jobId}: Artist square processing completed`);
-        res.status(202).json({ key, message: 'Artist square is being processed', url: `https://art.cider.sh/artwork/artist-square/${key}.jpg` });
-      }).catch((err) => {
-        logger.error(`Job ${jobId}: Error finishing processing - ${err.message}`);
-        res.status(500).send('Error processing the artist square');
-      });
+            logger.info(`Job ${jobId}: Artist square processing completed`);
+            res.status(202).json({ key, message: 'Artist square is being processed', url: `https://art.cider.sh/artwork/artist-square/${key}.jpg` });
+        }).catch((err) => {
+            logger.error(`Job ${jobId}: Error finishing processing - ${err.message}`);
+            res.status(500).send('Error processing the artist square');
+        });
     } catch (error) {
-      logger.error(`Job ${jobId}: Error adding to the queue - ${error.message}`);
-      res.status(500).send('Error adding to the queue');
+        logger.error(`Job ${jobId}: Error adding to the queue - ${error.message}`);
+        res.status(500).send('Error adding to the queue');
     }
 });
 
-// New route to retrieve artist square
 app.get('/artwork/artist-square/:key.jpg', (req, res) => {
     const key = req.params.key;
     const squarePath = path.join(artistSquaresDir, `${key}.jpg`);
   
     if (fs.existsSync(squarePath)) {
-      // Set cache headers for Cloudflare
-      const sevenDaysInSeconds = 7 * 24 * 60 * 60;
-      const expiresDate = new Date(Date.now() + sevenDaysInSeconds * 1000).toUTCString();
+        const sevenDaysInSeconds = 7 * 24 * 60 * 60;
+        const expiresDate = new Date(Date.now() + sevenDaysInSeconds * 1000).toUTCString();
   
-      res.setHeader('Cache-Control', `public, max-age=${sevenDaysInSeconds}`);
-      res.setHeader('Expires', expiresDate);
+        res.setHeader('Cache-Control', `public, max-age=${sevenDaysInSeconds}`);
+        res.setHeader('Expires', expiresDate);
       
-      logger.info(`Retrieving artist square for key ${key}`);
-      return res.sendFile(squarePath);
+        logger.info(`Retrieving artist square for key ${key}`);
+        return res.sendFile(squarePath);
     } else {
-      logger.warn(`Artist square not found for key ${key}`);
-      return res.status(404).send('Artist square not found');
+        logger.warn(`Artist square not found for key ${key}`);
+        return res.status(404).send('Artist square not found');
     }
 });
+
+// ============================================================================
+//  iCLOUD ART PROCESSING
+// ============================================================================
 
 const iCloudArtQueue = new Queue('iCloudArtQueue', {
     redis: {
@@ -426,23 +451,20 @@ iCloudArtQueue.on('failed', (job, err) => {
     logger.error(`iCloud Art Job ${job.id} failed: ${err.message}`);
 });
 
-// Function to generate a unique key for iCloud Art
 const generateiCloudArtKey = (imageUrl) => {
     return crypto.createHash('md5').update(imageUrl).digest('hex');
 };
 
-// Function to create iCloud Art
 const createiCloudArt = async (imageUrl) => {
-    const size = 1024; // Size of the final square image
+    const size = 1024;
     const image = await fetch(imageUrl).then(response => response.arrayBuffer());
   
     const icloudImage = sharp(image)
-      .resize(size, size, { fit: 'cover' });
+        .resize(size, size, { fit: 'cover' });
   
     return icloudImage.jpeg().toBuffer();
 };
 
-// Process job queue for iCloud Art
 iCloudArtQueue.process(3, async (job) => {
     const { imageUrl, key, jobId } = job.data;
     const icloudPath = path.join(icloudArtDir, `${key}.jpg`);
@@ -465,54 +487,50 @@ iCloudArtQueue.process(3, async (job) => {
     }
 });
 
-// iCloud Art Post
 app.post('/artwork/icloud', express.json(), async (req, res) => {
     const imageUrl = req.body.imageUrl;
   
     if (!imageUrl) {
-      return res.status(400).send('Invalid input. Provide an image URL.');
+        return res.status(400).send('Invalid input. Provide an image URL.');
     }
   
     const key = generateiCloudArtKey(imageUrl);
-    const squarePath = path.join(artistSquaresDir, `${key}.jpg`);
+    const squarePath = path.join(icloudArtDir, `${key}.jpg`);
     const jobId = crypto.randomBytes(4).toString('hex');
   
     if (fs.existsSync(squarePath)) {
-      logger.info(`Job ${jobId}: iCloud Art already exists for key ${key}`);
-      return res.status(200).json({ key, message: 'iCloud Art already exists', url: `https://art.cider.sh/artwork/icloud/${key}.jpg` });
+        logger.info(`Job ${jobId}: iCloud Art already exists for key ${key}`);
+        return res.status(200).json({ key, message: 'iCloud Art already exists', url: `https://art.cider.sh/artwork/icloud/${key}.jpg` });
     }
   
     try {
-      const job = await iCloudArtQueue.add({ imageUrl, key, jobId });
-      logger.info(`Job ${jobId}: Added to the iCloud Art queue`);
+        const job = await iCloudArtQueue.add({ imageUrl, key, jobId });
+        logger.info(`Job ${jobId}: Added to the iCloud Art queue`);
   
-      job.finished().then(() => {
-        // Set cache headers for Cloudflare
-        const sevenDaysInSeconds = 7 * 24 * 60 * 60;
-        const expiresDate = new Date(Date.now() + sevenDaysInSeconds * 1000).toUTCString();
+        job.finished().then(() => {
+            const sevenDaysInSeconds = 7 * 24 * 60 * 60;
+            const expiresDate = new Date(Date.now() + sevenDaysInSeconds * 1000).toUTCString();
   
-        res.setHeader('Cache-Control', `public, max-age=${sevenDaysInSeconds}`);
-        res.setHeader('Expires', expiresDate);
+            res.setHeader('Cache-Control', `public, max-age=${sevenDaysInSeconds}`);
+            res.setHeader('Expires', expiresDate);
   
-        logger.info(`Job ${jobId}: iCloud Art processing completed`);
-        res.status(202).json({ key, message: 'iCloud Art is being processed', url: `https://art.cider.sh/artwork/icloud/${key}.jpg` });
-      }).catch((err) => {
-        logger.error(`Job ${jobId}: Error finishing processing - ${err.message}`);
-        res.status(500).send('Error processing the iCloud Art');
-      });
+            logger.info(`Job ${jobId}: iCloud Art processing completed`);
+            res.status(202).json({ key, message: 'iCloud Art is being processed', url: `https://art.cider.sh/artwork/icloud/${key}.jpg` });
+        }).catch((err) => {
+            logger.error(`Job ${jobId}: Error finishing processing - ${err.message}`);
+            res.status(500).send('Error processing the iCloud Art');
+        });
     } catch (error) {
-      logger.error(`Job ${jobId}: Error adding to the queue - ${error.message}`);
-      res.status(500).send('Error adding to the queue');
+        logger.error(`Job ${jobId}: Error adding to the queue - ${error.message}`);
+        res.status(500).send('Error adding to the queue');
     }
 });
 
-// GET route for iCloud Art
 app.get('/artwork/icloud/:key.jpg', (req, res) => {
     const key = req.params.key;
     const iCloudPath = path.join(icloudArtDir, `${key}.jpg`);
 
     if (fs.existsSync(iCloudPath)) {
-        // Set cache headers for Cloudflare
         const sevenDaysInSeconds = 7 * 24 * 60 * 60;
         const expiresDate = new Date(Date.now() + sevenDaysInSeconds * 1000).toUTCString();
     
@@ -523,10 +541,22 @@ app.get('/artwork/icloud/:key.jpg', (req, res) => {
         return res.sendFile(iCloudPath);
     } else {
         logger.warn(`iCloud Art not found for key ${key}`);
-        return res.status(404).send('Artist square not found');
+        return res.status(404).send('iCloud Art not found');
     }
 });
 
-app.listen(port, () => {
-    logger.info(`Server is running on http://art.cider.sh/`);
-});
+// ============================================================================
+//  SERVER STARTUP
+// ============================================================================
+
+ensureDirectories()
+    .then(() => cleanAndMigrateCache())
+    .then(() => {
+        app.listen(port, () => {
+            logger.info(`Server is running on http://art.cider.sh/`);
+        });
+    })
+    .catch(err => {
+        logger.error(`Startup error: ${err.message}`);
+        process.exit(1);
+    });
