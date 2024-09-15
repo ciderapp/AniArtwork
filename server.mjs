@@ -21,12 +21,16 @@ const app = express();
 const port = 3000;
 const cacheDir = path.join(__dirname, 'cache');
 const artistSquaresDir = path.join(__dirname, 'cache', 'artist-squares');
+const icloudArtDir = path.join(__dirname, 'cache', 'icloud-art');
 
 // Ensure cache directory exists
 fsSync.mkdir(cacheDir, { recursive: true }).catch(err => logger.error(`Error creating cache directory: ${err.message}`));
 
 // Ensure artist squares directory exists
 fsSync.mkdir(artistSquaresDir, { recursive: true }).catch(err => logger.error(`Error creating artist squares directory: ${err.message}`));
+
+// Ensure iCloud Art directory exists
+fsSync.mkdir(icloudArtDir, { recursive: true }).catch(err => logger.error(`Error creating iCloud Art directory: ${err.message}`));
 
 
 // Configure logging
@@ -400,6 +404,126 @@ app.get('/artwork/artist-square/:key.jpg', (req, res) => {
     } else {
       logger.warn(`Artist square not found for key ${key}`);
       return res.status(404).send('Artist square not found');
+    }
+});
+
+const iCloudArtQueue = new Queue('iCloudArtQueue', {
+    redis: {
+        host: '10.10.79.15',
+        port: 6379
+    },
+    limiter: {
+        max: 5,
+        duration: 1000
+    }
+});
+
+iCloudArtQueue.on('error', (error) => {
+    logger.error(`iCloud Art Queue error: ${error.message}`);
+});
+
+iCloudArtQueue.on('failed', (job, err) => {
+    logger.error(`iCloud Art Job ${job.id} failed: ${err.message}`);
+});
+
+// Function to generate a unique key for iCloud Art
+const generateiCloudArtKey = (imageUrl) => {
+    return crypto.createHash('md5').update(imageUrl).digest('hex');
+};
+
+// Function to create iCloud Art
+const createiCloudArt = async (imageUrl) => {
+    const size = 1024; // Size of the final square image
+    const image = await fetch(imageUrl).then(response => response.arrayBuffer());
+  
+    const icloudImage = sharp(image)
+      .resize(size, size, { fit: 'cover' });
+  
+    return icloudImage.jpeg().toBuffer();
+};
+
+// Process job queue for iCloud Art
+iCloudArtQueue.process(3, async (job) => {
+    const { imageUrl, key, jobId } = job.data;
+    const icloudPath = path.join(icloudArtDir, `${key}.jpg`);
+
+    logger.info(`Job ${jobId}: Starting iCloud Art job for ${imageUrl}`);
+
+    if (fs.existsSync(icloudPath)) {
+        logger.info(`Job ${jobId}: iCloud Art already exists for key ${key}`);
+        return icloudPath;
+    }
+
+    try {
+        const cloudBuffer = await createiCloudArt(imageUrl);
+        await fsSync.writeFile(icloudPath, cloudBuffer);
+        logger.info(`Job ${jobId}: iCloud Art created for key ${key}`);
+        return icloudPath;
+    } catch (error) {
+        logger.error(`Job ${jobId}: Error creating iCloud Art - ${error.message}`);
+        throw new Error('Error creating iCloud Art');
+    }
+});
+
+// iCloud Art Post
+app.post('/artwork/icloud', express.json(), async (req, res) => {
+    const imageUrl = req.body.imageUrl;
+  
+    if (!imageUrl) {
+      return res.status(400).send('Invalid input. Provide an image URL.');
+    }
+  
+    const key = generateiCloudArtKey(imageUrl);
+    const squarePath = path.join(artistSquaresDir, `${key}.jpg`);
+    const jobId = crypto.randomBytes(4).toString('hex');
+  
+    if (fs.existsSync(squarePath)) {
+      logger.info(`Job ${jobId}: iCloud Art already exists for key ${key}`);
+      return res.status(200).json({ key, message: 'iCloud Art already exists', url: `https://art.cider.sh/artwork/icloud/${key}.jpg` });
+    }
+  
+    try {
+      const job = await iCloudArtQueue.add({ imageUrl, key, jobId });
+      logger.info(`Job ${jobId}: Added to the iCloud Art queue`);
+  
+      job.finished().then(() => {
+        // Set cache headers for Cloudflare
+        const sevenDaysInSeconds = 7 * 24 * 60 * 60;
+        const expiresDate = new Date(Date.now() + sevenDaysInSeconds * 1000).toUTCString();
+  
+        res.setHeader('Cache-Control', `public, max-age=${sevenDaysInSeconds}`);
+        res.setHeader('Expires', expiresDate);
+  
+        logger.info(`Job ${jobId}: iCloud Art processing completed`);
+        res.status(202).json({ key, message: 'iCloud Art is being processed', url: `https://art.cider.sh/artwork/icloud/${key}.jpg` });
+      }).catch((err) => {
+        logger.error(`Job ${jobId}: Error finishing processing - ${err.message}`);
+        res.status(500).send('Error processing the iCloud Art');
+      });
+    } catch (error) {
+      logger.error(`Job ${jobId}: Error adding to the queue - ${error.message}`);
+      res.status(500).send('Error adding to the queue');
+    }
+});
+
+// GET route for iCloud Art
+app.get('/artwork/icloud/:key.jpg', (req, res) => {
+    const key = req.params.key;
+    const iCloudPath = path.join(icloudArtDir, `${key}.jpg`);
+
+    if (fs.existsSync(iCloudPath)) {
+        // Set cache headers for Cloudflare
+        const sevenDaysInSeconds = 7 * 24 * 60 * 60;
+        const expiresDate = new Date(Date.now() + sevenDaysInSeconds * 1000).toUTCString();
+    
+        res.setHeader('Cache-Control', `public, max-age=${sevenDaysInSeconds}`);
+        res.setHeader('Expires', expiresDate);
+        
+        logger.info(`Retrieving iCloud Art for key ${key}`);
+        return res.sendFile(iCloudPath);
+    } else {
+        logger.warn(`iCloud Art not found for key ${key}`);
+        return res.status(404).send('Artist square not found');
     }
 });
 
