@@ -120,6 +120,44 @@ processQueue.on('failed', (job, err) => {
     logger.error(`Job ${job.id} failed: ${err.message}`);
 });
 
+const iCloudArtQueue = new Queue('iCloudArtQueue', {
+    redis: {
+        host: '10.10.79.15',
+        port: 6379
+    },
+    limiter: {
+        max: 5,
+        duration: 1000
+    }
+});
+
+iCloudArtQueue.on('error', (error) => {
+    logger.error(`iCloud Art Queue error: ${error.message}`);
+});
+
+iCloudArtQueue.on('failed', (job, err) => {
+    logger.error(`iCloud Art Job ${job.id} failed: ${err.message}`);
+});
+
+const artistSquareQueue = new Queue('artistSquareQueue', {
+    redis: {
+        host: '10.10.79.15',
+        port: 6379
+    },
+    limiter: {
+        max: 5,
+        duration: 1000
+    }
+});
+
+artistSquareQueue.on('error', (error) => {
+    logger.error(`Artist Square Queue error: ${error.message}`);
+});
+
+artistSquareQueue.on('failed', (job, err) => {
+    logger.error(`Artist Square Job ${job.id} failed: ${err.message}`);
+});
+
 // ============================================================================
 //  STREAM PROCESSING
 // ============================================================================
@@ -277,25 +315,6 @@ app.get('/artwork/:key.gif', (req, res) => {
 //  ARTIST SQUARE PROCESSING
 // ============================================================================
 
-const artistSquareQueue = new Queue('artistSquareQueue', {
-    redis: {
-        host: '10.10.79.15',
-        port: 6379
-    },
-    limiter: {
-        max: 5,
-        duration: 1000
-    }
-});
-
-artistSquareQueue.on('error', (error) => {
-    logger.error(`Artist Square Queue error: ${error.message}`);
-});
-
-artistSquareQueue.on('failed', (job, err) => {
-    logger.error(`Artist Square Job ${job.id} failed: ${err.message}`);
-});
-
 const generateArtistSquareKey = (imageUrls) => {
     const combinedUrls = imageUrls.sort().join('');
     return crypto.createHash('md5').update(combinedUrls).digest('hex');
@@ -432,25 +451,6 @@ app.get('/artwork/artist-square/:key.jpg', (req, res) => {
 //  iCLOUD ART PROCESSING
 // ============================================================================
 
-const iCloudArtQueue = new Queue('iCloudArtQueue', {
-    redis: {
-        host: '10.10.79.15',
-        port: 6379
-    },
-    limiter: {
-        max: 5,
-        duration: 1000
-    }
-});
-
-iCloudArtQueue.on('error', (error) => {
-    logger.error(`iCloud Art Queue error: ${error.message}`);
-});
-
-iCloudArtQueue.on('failed', (job, err) => {
-    logger.error(`iCloud Art Job ${job.id} failed: ${err.message}`);
-});
-
 const generateiCloudArtKey = (imageUrl) => {
     return crypto.createHash('md5').update(imageUrl).digest('hex');
 };
@@ -550,7 +550,8 @@ app.get('/artwork/icloud/:key.jpg', (req, res) => {
 // ============================================================================
 
 ensureDirectories()
-    .then(() => cleanAndMigrateCache())
+    // Disable migration, as it's not needed anymore
+    // .then(() => cleanAndMigrateCache())
     .then(() => {
         app.listen(port, () => {
             logger.info(`Server is running on http://art.cider.sh/`);
