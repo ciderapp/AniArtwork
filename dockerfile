@@ -22,9 +22,6 @@ RUN go build -o main .
 # Expose the port the app runs on
 EXPOSE 3000
 
-# Create cache directories
-RUN mkdir -p /app/cache/artist-squares /app/cache/icloud-art /app/cache/animated-art
-
 # Set environment variables
 ENV REDIS_ADDR=10.10.79.15:6379
 ENV CACHE_DIR=/app/cache
