@@ -1,23 +1,33 @@
-# Use the latest Node.js image with Yarn pre-installed as a base
-FROM node:18-alpine
+# Start from a Golang base image
+FROM golang:1.23-alpine
+
+# Install FFmpeg and other necessary tools
+RUN apk add --no-cache ffmpeg
 
 # Set the working directory
 WORKDIR /app
 
-# Install FFmpeg
-RUN apk add --update-cache ffmpeg make gcc g++ python3
+# Copy go mod and sum files
+COPY go.mod go.sum ./
 
-# Copy package.json and yarn.lock
-COPY package.json yarn.lock ./
+# Download all dependencies
+RUN go mod download
 
-# Install dependencies using Yarn
-RUN npm install
-
-# Copy the rest of the application code
+# Copy the source code into the container
 COPY . .
+
+# Build the application
+RUN go build -o main .
 
 # Expose the port the app runs on
 EXPOSE 3000
 
-# Define the command to run the application
-CMD ["node", "server.mjs"]
+# Create cache directories
+RUN mkdir -p /app/cache/artist-squares /app/cache/icloud-art /app/cache/animated-art
+
+# Set environment variables
+ENV REDIS_ADDR=10.10.79.15:6379
+ENV CACHE_DIR=/app/cache
+
+# Run the binary
+CMD ["./main"]
