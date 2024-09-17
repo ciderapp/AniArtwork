@@ -164,7 +164,7 @@ func generateArtworkAsync(urlStr, key, gifPath string) error {
 			"preset":             "fast",
 			"multiple_requests":  "1",
 			"buffer_size":        "8192k",
-			"loglevel":           "error", // Only log errors
+			"loglevel":           "panic", // Only log errors
 		}).
 		GlobalArgs("-hide_banner"). // Hide the FFmpeg banner
 		OverWriteOutput().
