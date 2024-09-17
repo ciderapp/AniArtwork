@@ -292,7 +292,6 @@ func generateArtistSquareAsync(imageURLs []string, key, squarePath string) error
 		return fmt.Errorf("failed to save artist square: %w", err)
 	}
 
-	logger.Infof("Artist square created and saved successfully for key %s", key)
 	return nil
 }
 
