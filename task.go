@@ -43,36 +43,26 @@ type CreateICloudArtPayload struct {
 func HandleCreateArtistSquareTask(ctx context.Context, t *asynq.Task) error {
 	var p CreateArtistSquarePayload
 	if err := json.Unmarshal(t.Payload(), &p); err != nil {
-		logger.Errorf("Job %s: Failed to unmarshal payload: %v", p.JobID, err)
 		return fmt.Errorf("json.Unmarshal failed: %v: %w", err, asynq.SkipRetry)
 	}
-
-	logger.Infof("Job %s: Starting artist square creation for %d images", p.JobID, len(p.ImageURLs))
 
 	squarePath := filepath.Join(artistSquares, fmt.Sprintf("%s.jpg", p.Key))
 
 	if _, err := os.Stat(squarePath); err == nil {
-		logger.Infof("Job %s: Artist square already exists for key %s", p.JobID, p.Key)
 		return nil
 	}
 
-	logger.Infof("Job %s: Downloading images", p.JobID)
 	images, err := downloadImages(p.ImageURLs)
 	if err != nil {
 		logger.Errorf("Job %s: Failed to download images: %v", p.JobID, err)
 		return fmt.Errorf("failed to download images: %w", err)
 	}
-	logger.Infof("Job %s: Successfully downloaded %d images", p.JobID, len(images))
 
-	logger.Infof("Job %s: Creating artist square", p.JobID)
 	square, err := createArtistSquare(images)
 	if err != nil {
 		logger.Errorf("Job %s: Failed to create artist square: %v", p.JobID, err)
 		return fmt.Errorf("failed to create artist square: %w", err)
 	}
-	logger.Infof("Job %s: Successfully created artist square", p.JobID)
-
-	logger.Infof("Job %s: Saving JPEG to %s", p.JobID, squarePath)
 	if err := saveJPEG(square, squarePath); err != nil {
 		logger.Errorf("Job %s: Failed to save artist square: %v", p.JobID, err)
 		return fmt.Errorf("failed to save artist square: %w", err)
@@ -85,7 +75,6 @@ func HandleCreateArtistSquareTask(ctx context.Context, t *asynq.Task) error {
 func downloadImages(urls []string) ([]image.Image, error) {
 	images := make([]image.Image, len(urls))
 	for i, url := range urls {
-		logger.Infof("Downloading image from URL: %s", url)
 		resp, err := http.Get(url)
 		if err != nil {
 			return nil, fmt.Errorf("failed to download image %s: %w", url, err)
@@ -102,7 +91,6 @@ func downloadImages(urls []string) ([]image.Image, error) {
 			return nil, fmt.Errorf("failed to decode image %s: %w", url, err)
 		}
 		images[i] = img
-		logger.Infof("Successfully downloaded and decoded image from URL: %s", url)
 	}
 	return images, nil
 }
@@ -172,12 +160,9 @@ func HandleCreateICloudArtTask(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("json.Unmarshal failed: %v: %w", err, asynq.SkipRetry)
 	}
 
-	logger.Infof("Job %s: Starting iCloud art creation for image %s", p.JobID, p.ImageURL)
-
 	iCloudPath := filepath.Join(icloudArt, fmt.Sprintf("%s.jpg", p.Key))
 
 	if _, err := os.Stat(iCloudPath); err == nil {
-		logger.Infof("Job %s: iCloud art already exists for key %s", p.JobID, p.Key)
 		return nil
 	}
 
@@ -195,7 +180,6 @@ func HandleCreateICloudArtTask(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("failed to save iCloud art: %w", err)
 	}
 
-	logger.Infof("Job %s: iCloud art created for key %s", p.JobID, p.Key)
 	return nil
 }
 
