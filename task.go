@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"image"
 	"image/draw"
@@ -11,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/hibiken/asynq"
 	"github.com/nfnt/resize"
 	"golang.org/x/image/webp"
 )
@@ -38,38 +35,6 @@ type CreateICloudArtPayload struct {
 	ImageURL string `json:"image_url"`
 	Key      string `json:"key"`
 	JobID    string `json:"job_id"`
-}
-
-func HandleCreateArtistSquareTask(ctx context.Context, t *asynq.Task) error {
-	var p CreateArtistSquarePayload
-	if err := json.Unmarshal(t.Payload(), &p); err != nil {
-		return fmt.Errorf("json.Unmarshal failed: %v: %w", err, asynq.SkipRetry)
-	}
-
-	squarePath := filepath.Join(artistSquares, fmt.Sprintf("%s.jpg", p.Key))
-
-	if _, err := os.Stat(squarePath); err == nil {
-		return nil
-	}
-
-	images, err := downloadImages(p.ImageURLs)
-	if err != nil {
-		logger.Errorf("Job %s: Failed to download images: %v", p.JobID, err)
-		return fmt.Errorf("failed to download images: %w", err)
-	}
-
-	square, err := createArtistSquare(images)
-	if err != nil {
-		logger.Errorf("Job %s: Failed to create artist square: %v", p.JobID, err)
-		return fmt.Errorf("failed to create artist square: %w", err)
-	}
-	if err := saveJPEG(square, squarePath); err != nil {
-		logger.Errorf("Job %s: Failed to save artist square: %v", p.JobID, err)
-		return fmt.Errorf("failed to save artist square: %w", err)
-	}
-
-	logger.Infof("Job %s: Artist square created and saved successfully for key %s", p.JobID, p.Key)
-	return nil
 }
 
 func downloadImages(urls []string) ([]image.Image, error) {
@@ -152,35 +117,6 @@ func saveJPEG(img image.Image, path string) error {
 	defer f.Close()
 
 	return jpeg.Encode(f, img, &jpeg.Options{Quality: 90})
-}
-
-func HandleCreateICloudArtTask(ctx context.Context, t *asynq.Task) error {
-	var p CreateICloudArtPayload
-	if err := json.Unmarshal(t.Payload(), &p); err != nil {
-		return fmt.Errorf("json.Unmarshal failed: %v: %w", err, asynq.SkipRetry)
-	}
-
-	iCloudPath := filepath.Join(icloudArt, fmt.Sprintf("%s.jpg", p.Key))
-
-	if _, err := os.Stat(iCloudPath); err == nil {
-		return nil
-	}
-
-	img, err := downloadImage(p.ImageURL)
-	if err != nil {
-		return fmt.Errorf("failed to download image: %w", err)
-	}
-
-	iCloudImg, err := createICloudArt(img)
-	if err != nil {
-		return fmt.Errorf("failed to create iCloud art: %w", err)
-	}
-
-	if err := saveJPEG(iCloudImg, iCloudPath); err != nil {
-		return fmt.Errorf("failed to save iCloud art: %w", err)
-	}
-
-	return nil
 }
 
 func downloadImage(url string) (image.Image, error) {

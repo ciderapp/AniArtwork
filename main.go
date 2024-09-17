@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/md5"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -14,16 +13,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/go-redis/redis/v8"
-	"github.com/hibiken/asynq"
 	"github.com/sirupsen/logrus"
 	ffmpeg "github.com/u2takey/ffmpeg-go"
 )
 
 var (
 	logger        *logrus.Logger
-	redisClient   *redis.Client
-	taskClient    *asynq.Client
 	cacheDir      string
 	artistSquares string
 	icloudArt     string
@@ -59,14 +54,6 @@ func init() {
 	ffmpeg.LogCompiledCommand = false
 
 	ensureDirectories()
-
-	// Initialize Redis client
-	redisClient = redis.NewClient(&redis.Options{
-		Addr: "10.10.79.15:6379",
-	})
-
-	// Initialize Asynq client
-	taskClient = asynq.NewClient(asynq.RedisClientOpt{Addr: "10.10.79.15:6379"})
 }
 
 func ensureDirectories() {
@@ -94,31 +81,6 @@ func main() {
 	r.GET("/artwork/artist-square/:key", getArtistSquare)
 	r.POST("/artwork/icloud", generateICloudArt)
 	r.GET("/artwork/icloud/:key", getICloudArt)
-
-	// Initialize task server
-	srv := asynq.NewServer(
-		asynq.RedisClientOpt{Addr: "10.10.79.15:6379"},
-		asynq.Config{
-			Concurrency: 10,
-			Queues: map[string]int{
-				"critical": 6,
-				"default":  3,
-				"low":      1,
-			},
-		},
-	)
-
-	// Register task handlers
-	mux := asynq.NewServeMux()
-	mux.HandleFunc(TypeCreateArtistSquare, HandleCreateArtistSquareTask)
-	mux.HandleFunc(TypeCreateICloudArt, HandleCreateICloudArtTask)
-
-	// Start task server
-	go func() {
-		if err := srv.Run(mux); err != nil {
-			logger.Fatalf("Could not run task server: %v", err)
-		}
-	}()
 
 	// Start server
 	if err := r.Run(":3000"); err != nil {
@@ -281,32 +243,57 @@ func generateArtistSquare(c *gin.Context) {
 		return
 	}
 
-	payload, err := json.Marshal(CreateArtistSquarePayload{
-		ImageURLs: request.ImageURLs,
-		Key:       key,
-		JobID:     generateKey(fmt.Sprintf("%s%s", key, request.ImageURLs[0])),
-	})
+	// Create a channel to receive the result
+	resultChan := make(chan error)
+
+	// Start a goroutine to generate the artist square
+	go func() {
+		err := generateArtistSquareAsync(request.ImageURLs, key, squarePath)
+		resultChan <- err
+	}()
+
+	// Wait for the goroutine to complete or timeout
+	select {
+	case err := <-resultChan:
+		if err != nil {
+			logger.Errorf("Failed to generate artist square: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate artist square"})
+		} else {
+			c.JSON(http.StatusOK, gin.H{
+				"key":     key,
+				"message": "Artist square has been generated",
+				"url":     fmt.Sprintf("https://art.cider.sh/artwork/artist-square/%s.jpg", key),
+			})
+		}
+	case <-time.After(30 * time.Second): // Adjust timeout as needed
+		c.JSON(http.StatusAccepted, gin.H{
+			"key":     key,
+			"message": "Artist square is still being processed. Please check back later.",
+			"url":     fmt.Sprintf("https://art.cider.sh/artwork/artist-square/%s.jpg", key),
+		})
+	}
+}
+
+func generateArtistSquareAsync(imageURLs []string, key, squarePath string) error {
+	images, err := downloadImages(imageURLs)
 	if err != nil {
-		logger.Errorf("Could not marshal task payload: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create task"})
-		return
+		logger.Errorf("Failed to download images: %v", err)
+		return fmt.Errorf("failed to download images: %w", err)
 	}
 
-	task := asynq.NewTask(TypeCreateArtistSquare, payload)
-	info, err := taskClient.Enqueue(task)
+	square, err := createArtistSquare(images)
 	if err != nil {
-		logger.Errorf("Could not enqueue task: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not enqueue task"})
-		return
+		logger.Errorf("Failed to create artist square: %v", err)
+		return fmt.Errorf("failed to create artist square: %w", err)
 	}
 
-	logger.Infof("Enqueued task: id=%s queue=%s", info.ID, info.Queue)
+	if err := saveJPEG(square, squarePath); err != nil {
+		logger.Errorf("Failed to save artist square: %v", err)
+		return fmt.Errorf("failed to save artist square: %w", err)
+	}
 
-	c.JSON(http.StatusAccepted, gin.H{
-		"key":     key,
-		"message": "Artist square is being processed",
-		"url":     fmt.Sprintf("https://art.cider.sh/artwork/artist-square/%s.jpg", key),
-	})
+	logger.Infof("Artist square created and saved successfully for key %s", key)
+	return nil
 }
 
 func getArtistSquare(c *gin.Context) {
@@ -353,32 +340,54 @@ func generateICloudArt(c *gin.Context) {
 		return
 	}
 
-	payload, err := json.Marshal(CreateICloudArtPayload{
-		ImageURL: request.ImageURL,
-		Key:      key,
-		JobID:    generateKey(fmt.Sprintf("%s%s", key, request.ImageURL)),
-	})
+	// Create a channel to receive the result
+	resultChan := make(chan error)
+
+	// Start a goroutine to generate the iCloud art
+	go func() {
+		err := generateICloudArtAsync(request.ImageURL, key, iCloudPath)
+		resultChan <- err
+	}()
+
+	// Wait for the goroutine to complete or timeout
+	select {
+	case err := <-resultChan:
+		if err != nil {
+			logger.Errorf("Failed to generate iCloud art: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate iCloud art"})
+		} else {
+			c.JSON(http.StatusOK, gin.H{
+				"key":     key,
+				"message": "iCloud art has been generated",
+				"url":     fmt.Sprintf("https://art.cider.sh/artwork/icloud/%s.jpg", key),
+			})
+		}
+	case <-time.After(30 * time.Second): // Adjust timeout as needed
+		c.JSON(http.StatusAccepted, gin.H{
+			"key":     key,
+			"message": "iCloud art is still being processed. Please check back later.",
+			"url":     fmt.Sprintf("https://art.cider.sh/artwork/icloud/%s.jpg", key),
+		})
+	}
+}
+
+func generateICloudArtAsync(imageURL, key, iCloudPath string) error {
+	img, err := downloadImage(imageURL)
 	if err != nil {
-		logger.Errorf("Could not marshal task payload: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create task"})
-		return
+		return fmt.Errorf("failed to download image: %w", err)
 	}
 
-	task := asynq.NewTask(TypeCreateICloudArt, payload)
-	info, err := taskClient.Enqueue(task)
+	iCloudImg, err := createICloudArt(img)
 	if err != nil {
-		logger.Errorf("Could not enqueue task: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not enqueue task"})
-		return
+		return fmt.Errorf("failed to create iCloud art: %w", err)
 	}
 
-	logger.Infof("Enqueued task: id=%s queue=%s", info.ID, info.Queue)
+	if err := saveJPEG(iCloudImg, iCloudPath); err != nil {
+		return fmt.Errorf("failed to save iCloud art: %w", err)
+	}
 
-	c.JSON(http.StatusAccepted, gin.H{
-		"key":     key,
-		"message": "iCloud art is being processed",
-		"url":     fmt.Sprintf("https://art.cider.sh/artwork/icloud/%s.jpg", key),
-	})
+	logger.Infof("iCloud art created and saved successfully for key %s", key)
+	return nil
 }
 
 func getICloudArt(c *gin.Context) {
