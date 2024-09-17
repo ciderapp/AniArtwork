@@ -196,12 +196,13 @@ func generateArtworkAsync(urlStr, key, gifPath string) error {
 
 	err := ffmpeg.Input(urlStr).
 		Output(tempGifPath, ffmpeg.KwArgs{
-			"vf":                "fps=15,scale=500:-1:flags=lanczos",
-			"threads":           "8",
-			"preset":            "fast",
-			"multiple_requests": "1",
-			"buffer_size":       "8192k",
-			"loglevel":          "error", // Only log errors
+			"protocol_whitelist": "file,http,https,tcp,tls,crypto",
+			"vf":                 "fps=15,scale=500:-1:flags=lanczos",
+			"threads":            "8",
+			"preset":             "fast",
+			"multiple_requests":  "1",
+			"buffer_size":        "8192k",
+			"loglevel":           "error", // Only log errors
 		}).
 		GlobalArgs("-hide_banner"). // Hide the FFmpeg banner
 		OverWriteOutput().
