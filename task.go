@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
+	"strings"
 
 	"github.com/nfnt/resize"
 )
@@ -34,13 +35,21 @@ type CreateICloudArtPayload struct {
 
 func downloadImages(urls []string) ([]image.Image, error) {
 	var images []image.Image
+	var errors []string
+
 	for _, url := range urls {
 		img, _, err := downloadImage(url)
 		if err != nil {
-			return nil, fmt.Errorf("failed to download image from %s: %w", url, err)
+			errors = append(errors, fmt.Sprintf("failed to download image from %s: %v", url, err))
+			continue
 		}
 		images = append(images, img)
 	}
+
+	if len(errors) > 0 {
+		return images, fmt.Errorf("some images failed to download: %s", strings.Join(errors, "; "))
+	}
+
 	return images, nil
 }
 

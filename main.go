@@ -500,11 +500,25 @@ func generateICloudArt(c *gin.Context) {
 }
 
 func downloadImage(url string) (image.Image, string, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to download image: %w", err)
+	var resp *http.Response
+	var err error
+	maxRetries := 3
+	retryDelay := time.Second
+
+	for i := 0; i < maxRetries; i++ {
+		resp, err = http.Get(url)
+		if err == nil {
+			defer resp.Body.Close()
+			break
+		}
+		logger.Warnf("Attempt %d: Failed to download image from %s: %v. Retrying...", i+1, url, err)
+		time.Sleep(retryDelay)
+		retryDelay *= 2 // Exponential backoff
 	}
-	defer resp.Body.Close()
+
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to download image after %d attempts: %w", maxRetries, err)
+	}
 
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
@@ -514,10 +528,15 @@ func downloadImage(url string) (image.Image, string, error) {
 		}
 	}
 
-	// Read the entire response body
-	imgData, err := io.ReadAll(resp.Body)
+	// Read the entire response body with a timeout
+	bodyReader := io.LimitReader(resp.Body, 50*1024*1024) // 50MB limit to prevent memory issues
+	imgData, err := io.ReadAll(bodyReader)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to read image data: %w", err)
+	}
+
+	if len(imgData) == 0 {
+		return nil, "", fmt.Errorf("downloaded image data is empty")
 	}
 
 	// Determine the image format and decode accordingly
@@ -536,12 +555,12 @@ func downloadImage(url string) (image.Image, string, error) {
 		format = "gif"
 	case strings.Contains(contentType, "webp"):
 		img, err = webp.Decode(bytes.NewReader(imgData))
-		format = "webp"
+		format = "png" // We'll save WebP images as PNG
 	default:
 		// If we can't determine the format from content type, try to decode as WebP
 		img, err = webp.Decode(bytes.NewReader(imgData))
 		if err == nil {
-			format = "webp"
+			format = "png" // We'll save WebP images as PNG
 		} else {
 			// If WebP decoding fails, try to guess from the file extension
 			format = strings.TrimPrefix(path.Ext(url), ".")
