@@ -2,12 +2,19 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
+	"image"
+	"image/gif"
+	"image/jpeg"
+	"image/png"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -17,6 +24,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 	ffmpeg "github.com/u2takey/ffmpeg-go"
+	"golang.org/x/image/webp"
 )
 
 var (
@@ -344,7 +352,7 @@ func generateArtistSquare(c *gin.Context) {
 
 	// Start a goroutine to generate the artist square
 	go func() {
-		err := generateArtistSquareAsync(request.ImageURLs, key, squarePath)
+		err := generateArtistSquareAsync(request.ImageURLs, key)
 		resultChan <- err
 	}()
 
@@ -370,7 +378,7 @@ func generateArtistSquare(c *gin.Context) {
 	}
 }
 
-func generateArtistSquareAsync(imageURLs []string, key, squarePath string) error {
+func generateArtistSquareAsync(imageURLs []string, key string) error {
 	images, err := downloadImages(imageURLs)
 	if err != nil {
 		logger.Errorf("Failed to download images: %v", err)
@@ -383,7 +391,9 @@ func generateArtistSquareAsync(imageURLs []string, key, squarePath string) error
 		return fmt.Errorf("failed to create artist square: %w", err)
 	}
 
-	if err := saveJPEG(square, squarePath); err != nil {
+	squarePath := filepath.Join(artistSquares, fmt.Sprintf("%s.jpg", key))
+
+	if err := saveImage(square, squarePath, "jpg"); err != nil {
 		logger.Errorf("Failed to save artist square: %v", err)
 		return fmt.Errorf("failed to save artist square: %w", err)
 	}
@@ -424,50 +434,134 @@ func generateICloudArt(c *gin.Context) {
 	}
 
 	key := generateKey(request.ImageURL)
-	iCloudPath := filepath.Join(icloudArt, fmt.Sprintf("%s.jpg", key))
 
-	if _, err := os.Stat(iCloudPath); err == nil {
+	// Check if the image already exists in any of the supported formats
+	formats := []string{"jpg", "jpeg", "png", "gif"}
+	var existingPath string
+	for _, format := range formats {
+		testPath := filepath.Join(icloudArt, fmt.Sprintf("%s.%s", key, format))
+		if _, err := os.Stat(testPath); err == nil {
+			existingPath = testPath
+			break
+		}
+	}
+
+	if existingPath != "" {
+		// Image already exists, return its information
 		c.JSON(http.StatusOK, gin.H{
 			"key":     key,
 			"message": "iCloud art already exists",
-			"url":     fmt.Sprintf("https://art.cider.sh/artwork/icloud/%s.jpg", key),
+			"url":     fmt.Sprintf("https://art.cider.sh/artwork/icloud/%s%s", key, filepath.Ext(existingPath)),
 		})
 		return
 	}
 
-	// Create a channel to receive the result
+	// Image doesn't exist, generate it
 	resultChan := make(chan error)
 
-	// Start a goroutine to generate the iCloud art
 	go func() {
-		err := generateICloudArtAsync(request.ImageURL, key, iCloudPath)
+		err := generateICloudArtAsync(request.ImageURL, key)
 		resultChan <- err
 	}()
 
-	// Wait for the goroutine to complete or timeout
 	select {
 	case err := <-resultChan:
 		if err != nil {
 			logger.Errorf("Failed to generate iCloud art: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate iCloud art"})
 		} else {
-			c.JSON(http.StatusOK, gin.H{
-				"key":     key,
-				"message": "iCloud art has been generated",
-				"url":     fmt.Sprintf("https://art.cider.sh/artwork/icloud/%s.jpg", key),
-			})
+			// Find the generated file and its format
+			var generatedPath string
+			for _, format := range formats {
+				testPath := filepath.Join(icloudArt, fmt.Sprintf("%s.%s", key, format))
+				if _, err := os.Stat(testPath); err == nil {
+					generatedPath = testPath
+					break
+				}
+			}
+
+			if generatedPath == "" {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to locate generated iCloud art"})
+			} else {
+				c.JSON(http.StatusOK, gin.H{
+					"key":     key,
+					"message": "iCloud art has been generated",
+					"url":     fmt.Sprintf("https://art.cider.sh/artwork/icloud/%s%s", key, filepath.Ext(generatedPath)),
+				})
+			}
 		}
 	case <-time.After(30 * time.Second): // Adjust timeout as needed
 		c.JSON(http.StatusAccepted, gin.H{
 			"key":     key,
 			"message": "iCloud art is still being processed. Please check back later.",
-			"url":     fmt.Sprintf("https://art.cider.sh/artwork/icloud/%s.jpg", key),
+			"url":     fmt.Sprintf("https://art.cider.sh/artwork/icloud/%s", key),
 		})
 	}
 }
 
-func generateICloudArtAsync(imageURL, key, iCloudPath string) error {
-	img, err := downloadImage(imageURL)
+func downloadImage(url string) (image.Image, string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to download image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType, err = getContentType(url)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to get content type: %w", err)
+		}
+	}
+
+	// Read the entire response body
+	imgData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read image data: %w", err)
+	}
+
+	// Determine the image format and decode accordingly
+	var img image.Image
+	var format string
+
+	switch {
+	case strings.Contains(contentType, "jpeg") || strings.Contains(contentType, "jpg"):
+		img, err = jpeg.Decode(bytes.NewReader(imgData))
+		format = "jpg"
+	case strings.Contains(contentType, "png"):
+		img, err = png.Decode(bytes.NewReader(imgData))
+		format = "png"
+	case strings.Contains(contentType, "gif"):
+		img, err = gif.Decode(bytes.NewReader(imgData))
+		format = "gif"
+	case strings.Contains(contentType, "webp"):
+		img, err = webp.Decode(bytes.NewReader(imgData))
+		format = "webp"
+	default:
+		// If we can't determine the format from content type, try to decode as WebP
+		img, err = webp.Decode(bytes.NewReader(imgData))
+		if err == nil {
+			format = "webp"
+		} else {
+			// If WebP decoding fails, try to guess from the file extension
+			format = strings.TrimPrefix(path.Ext(url), ".")
+			if format == "" {
+				return nil, "", fmt.Errorf("unknown image format for URL: %s", url)
+			}
+			// Try to decode using the guessed format
+			img, _, err = image.Decode(bytes.NewReader(imgData))
+		}
+	}
+
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to decode image: %w", err)
+	}
+
+	return img, format, nil
+}
+
+func generateICloudArtAsync(imageURL, key string) error {
+	img, format, err := downloadImage(imageURL)
 	if err != nil {
 		return fmt.Errorf("failed to download image: %w", err)
 	}
@@ -477,7 +571,10 @@ func generateICloudArtAsync(imageURL, key, iCloudPath string) error {
 		return fmt.Errorf("failed to create iCloud art: %w", err)
 	}
 
-	if err := saveJPEG(iCloudImg, iCloudPath); err != nil {
+	// Use the original format for the file extension
+	iCloudPath := filepath.Join(icloudArt, fmt.Sprintf("%s.%s", key, format))
+
+	if err := saveImage(iCloudImg, iCloudPath, format); err != nil {
 		return fmt.Errorf("failed to save iCloud art: %w", err)
 	}
 
@@ -485,21 +582,58 @@ func generateICloudArtAsync(imageURL, key, iCloudPath string) error {
 	return nil
 }
 
-func getICloudArt(c *gin.Context) {
-	key := strings.TrimSuffix(c.Param("key"), ".jpg")
-	iCloudPath := filepath.Join(icloudArt, fmt.Sprintf("%s.jpg", key))
+func saveImage(img image.Image, filePath, format string) error {
+	file, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
 
-	if _, err := os.Stat(iCloudPath); os.IsNotExist(err) {
+	switch format {
+	case "jpeg", "jpg":
+		return jpeg.Encode(file, img, &jpeg.Options{Quality: 95})
+	case "png":
+		return png.Encode(file, img)
+	case "gif":
+		return gif.Encode(file, img, &gif.Options{})
+	default:
+		return fmt.Errorf("unsupported image format: %s", format)
+	}
+}
+
+func getICloudArt(c *gin.Context) {
+	key := c.Param("key")
+
+	// Check for each possible format
+	formats := []string{"jpg", "jpeg", "png", "gif"}
+	var iCloudPath string
+
+	for _, format := range formats {
+		testPath := filepath.Join(icloudArt, fmt.Sprintf("%s.%s", key, format))
+		if _, err := os.Stat(testPath); err == nil {
+			iCloudPath = testPath
+			break
+		}
+	}
+
+	if iCloudPath == "" {
 		logger.Warnf("iCloud Art not found for key: %s", key)
 		c.JSON(http.StatusNotFound, gin.H{"error": "iCloud Art not found"})
-		return
-	} else if err != nil {
-		logger.Errorf("Error accessing iCloud Art for key %s: %v", key, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error accessing iCloud Art"})
 		return
 	}
 
 	c.File(iCloudPath)
+}
+
+func getContentType(url string) (string, error) {
+	resp, err := http.Head(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	contentType := resp.Header.Get("Content-Type")
+	return contentType, nil
 }
 
 func isValidAppleURL(urlStr string) error {

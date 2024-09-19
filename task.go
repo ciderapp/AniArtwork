@@ -4,13 +4,8 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
-	"image/jpeg"
-	"net/http"
-	"os"
-	"path/filepath"
 
 	"github.com/nfnt/resize"
-	"golang.org/x/image/webp"
 )
 
 const (
@@ -38,24 +33,13 @@ type CreateICloudArtPayload struct {
 }
 
 func downloadImages(urls []string) ([]image.Image, error) {
-	images := make([]image.Image, len(urls))
-	for i, url := range urls {
-		resp, err := http.Get(url)
+	var images []image.Image
+	for _, url := range urls {
+		img, _, err := downloadImage(url)
 		if err != nil {
-			return nil, fmt.Errorf("failed to download image %s: %w", url, err)
+			return nil, fmt.Errorf("failed to download image from %s: %w", url, err)
 		}
-		defer resp.Body.Close()
-
-		var img image.Image
-		if filepath.Ext(url) == ".webp" {
-			img, err = webp.Decode(resp.Body)
-		} else {
-			img, _, err = image.Decode(resp.Body)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode image %s: %w", url, err)
-		}
-		images[i] = img
+		images = append(images, img)
 	}
 	return images, nil
 }
@@ -107,31 +91,6 @@ func createArtistSquare(images []image.Image) (image.Image, error) {
 	}
 
 	return background, nil
-}
-
-func saveJPEG(img image.Image, path string) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	return jpeg.Encode(f, img, &jpeg.Options{Quality: 90})
-}
-
-func downloadImage(url string) (image.Image, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to download image %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-
-	img, _, err := image.Decode(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode image %s: %w", url, err)
-	}
-
-	return img, nil
 }
 
 func createICloudArt(img image.Image) (image.Image, error) {
