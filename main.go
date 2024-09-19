@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -112,16 +114,13 @@ func generateArtwork(c *gin.Context) {
 		return
 	}
 
-	// Create a channel to receive the result
 	resultChan := make(chan error)
 
-	// Start a goroutine to generate the artwork
 	go func() {
 		err := generateArtworkAsync(urlStr, key, gifPath)
 		resultChan <- err
 	}()
 
-	// Wait for the goroutine to complete or timeout
 	select {
 	case err := <-resultChan:
 		if err != nil {
@@ -134,19 +133,14 @@ func generateArtwork(c *gin.Context) {
 				"url":     fmt.Sprintf("https://art.cider.sh/artwork/%s.gif", key),
 			})
 		}
-	case <-time.After(30 * time.Second): // Adjust timeout as needed
-		c.JSON(http.StatusAccepted, gin.H{
-			"key":     key,
-			"message": "GIF is still being processed. Please check back later.",
-			"url":     fmt.Sprintf("https://art.cider.sh/artwork/%s.gif", key),
-		})
+	case <-time.After(30 * time.Second):
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "GIF generation timed out"})
 	}
 }
 
 func generateArtworkAsync(urlStr, key, gifPath string) error {
 	tempGifPath := filepath.Join(animatedArt, fmt.Sprintf("%s_temp.gif", key))
 
-	// Defer a cleanup function to remove the temporary file if any error occurs
 	defer func() {
 		if _, err := os.Stat(tempGifPath); err == nil {
 			logger.Infof("Cleaning up temporary file %s", tempGifPath)
@@ -156,17 +150,23 @@ func generateArtworkAsync(urlStr, key, gifPath string) error {
 		}
 	}()
 
-	err := ffmpeg.Input(urlStr).
+	// Parse the m3u8 file
+	streamURL, err := getHighQualityStreamURL(urlStr)
+	if err != nil {
+		return fmt.Errorf("failed to get high quality stream URL: %w", err)
+	}
+
+	err = ffmpeg.Input(streamURL).
 		Output(tempGifPath, ffmpeg.KwArgs{
-			"protocol_whitelist": "file,http,https,tcp,tls,crypto",
-			"vf":                 "fps=15,scale=500:-1:flags=lanczos",
-			"threads":            "8",
-			"preset":             "fast",
-			"multiple_requests":  "1",
-			"buffer_size":        "8192k",
-			"loglevel":           "panic", // Only log errors
+			"vf":                "scale=486:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
+			"loop":              "0", // Loop infinitely
+			"threads":           "8",
+			"preset":            "fast",
+			"multiple_requests": "1",
+			"buffer_size":       "8192k",
+			"loglevel":          "panic", // Only log errors
 		}).
-		GlobalArgs("-hide_banner"). // Hide the FFmpeg banner
+		GlobalArgs("-hide_banner").
 		OverWriteOutput().
 		ErrorToStdOut().
 		Run()
@@ -176,7 +176,6 @@ func generateArtworkAsync(urlStr, key, gifPath string) error {
 		return fmt.Errorf("ffmpeg command failed: %w", err)
 	}
 
-	// Check if the temporary file was actually created and has content
 	if fi, err := os.Stat(tempGifPath); err != nil || fi.Size() == 0 {
 		logger.Errorf("Temporary file %s was not created or is empty", tempGifPath)
 		return fmt.Errorf("ffmpeg failed to create output file")
@@ -188,6 +187,103 @@ func generateArtworkAsync(urlStr, key, gifPath string) error {
 	}
 
 	return nil
+}
+
+func getHighQualityStreamURL(masterPlaylistURL string) (string, error) {
+	resp, err := http.Get(masterPlaylistURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch master playlist: %w", err)
+	}
+	defer resp.Body.Close()
+
+	scanner := bufio.NewScanner(resp.Body)
+	var selectedStreamURL string
+	var maxWidth int
+	var streamURL string
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "#EXT-X-STREAM-INF:") {
+			info := parseStreamInfo(line)
+			if isValidStream(info) {
+				width := info.resolution.width
+				if width > maxWidth {
+					maxWidth = width
+					streamURL = ""
+				}
+			}
+		} else if strings.HasPrefix(line, "http") && streamURL == "" {
+			streamURL = line
+			if maxWidth > 0 {
+				selectedStreamURL = streamURL
+			}
+		}
+	}
+
+	if selectedStreamURL == "" {
+		return "", fmt.Errorf("no suitable stream found")
+	}
+
+	return resolveURL(masterPlaylistURL, selectedStreamURL), nil
+}
+
+type streamInfo struct {
+	averageBandwidth int
+	bandwidth        int
+	codecs           string
+	frameRate        float64
+	resolution       struct {
+		width  int
+		height int
+	}
+}
+
+func parseStreamInfo(line string) streamInfo {
+	info := streamInfo{}
+	parts := strings.Split(line[18:], ",")
+	for _, part := range parts {
+		keyValue := strings.SplitN(part, "=", 2)
+		if len(keyValue) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(keyValue[0])
+		value := strings.Trim(keyValue[1], "\"")
+		switch key {
+		case "AVERAGE-BANDWIDTH":
+			info.averageBandwidth, _ = strconv.Atoi(value)
+		case "BANDWIDTH":
+			info.bandwidth, _ = strconv.Atoi(value)
+		case "CODECS":
+			info.codecs = value
+		case "FRAME-RATE":
+			info.frameRate, _ = strconv.ParseFloat(value, 64)
+		case "RESOLUTION":
+			res := strings.Split(value, "x")
+			if len(res) == 2 {
+				info.resolution.width, _ = strconv.Atoi(res[0])
+				info.resolution.height, _ = strconv.Atoi(res[1])
+			}
+		}
+	}
+	return info
+}
+
+func isValidStream(info streamInfo) bool {
+	return !strings.Contains(info.codecs, "hvc1") &&
+		strings.Contains(info.codecs, "avc1") &&
+		info.resolution.width >= 450
+}
+
+func resolveURL(base, relative string) string {
+	baseURL, err := url.Parse(base)
+	if err != nil {
+		return relative
+	}
+	relativeURL, err := url.Parse(relative)
+	if err != nil {
+		return relative
+	}
+	return baseURL.ResolveReference(relativeURL).String()
 }
 
 func getArtwork(c *gin.Context) {
