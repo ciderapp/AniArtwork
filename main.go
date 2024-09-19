@@ -299,7 +299,6 @@ func getArtwork(c *gin.Context) {
 	gifPath := filepath.Join(animatedArt, fmt.Sprintf("%s.gif", key))
 
 	if _, err := os.Stat(gifPath); os.IsNotExist(err) {
-		logger.Warnf("GIF not found for key: %s", key)
 		c.JSON(http.StatusNotFound, gin.H{"error": "GIF not found"})
 		return
 	} else if err != nil {
@@ -406,7 +405,6 @@ func getArtistSquare(c *gin.Context) {
 	squarePath := filepath.Join(artistSquares, fmt.Sprintf("%s.jpg", key))
 
 	if _, err := os.Stat(squarePath); os.IsNotExist(err) {
-		logger.Warnf("Artist Square not found for key: %s", key)
 		c.JSON(http.StatusNotFound, gin.H{"error": "Artist Square not found"})
 		return
 	} else if err != nil {
@@ -597,7 +595,6 @@ func generateICloudArtAsync(imageURL, key string) error {
 		return fmt.Errorf("failed to save iCloud art: %w", err)
 	}
 
-	logger.Infof("iCloud art created and saved successfully for key %s", key)
 	return nil
 }
 
@@ -636,7 +633,6 @@ func getICloudArt(c *gin.Context) {
 	}
 
 	if iCloudPath == "" {
-		logger.Warnf("iCloud Art not found for key: %s", key)
 		c.JSON(http.StatusNotFound, gin.H{"error": "iCloud Art not found"})
 		return
 	}
