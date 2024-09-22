@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-resty/resty/v2"
 	"golang.org/x/image/webp"
 )
 
@@ -176,17 +177,6 @@ func resolveURL(base, relative string) string {
 	return baseURL.ResolveReference(relativeURL).String()
 }
 
-func getContentType(url string) (string, error) {
-	resp, err := http.Head(url)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	contentType := resp.Header.Get("Content-Type")
-	return contentType, nil
-}
-
 func isValidAppleURL(urlStr string) error {
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
@@ -202,37 +192,28 @@ func isValidAppleURL(urlStr string) error {
 }
 
 func downloadImage(url string) (image.Image, string, error) {
-	var resp *http.Response
-	var err error
-	maxRetries := 3
-	retryDelay := time.Second
+	client := resty.New().
+		SetRetryCount(3).
+		SetRetryWaitTime(1 * time.Second).
+		SetRetryMaxWaitTime(5 * time.Second).
+		SetTimeout(30 * time.Second)
 
-	for i := 0; i < maxRetries; i++ {
-		resp, err = http.Get(url)
-		if err == nil {
-			defer resp.Body.Close()
-			break
-		}
-		logger.Warnf("Attempt %d: Failed to download image from %s: %v. Retrying...", i+1, url, err)
-		time.Sleep(retryDelay)
-		retryDelay *= 2 // Exponential backoff
-	}
+	resp, err := client.R().
+		SetDoNotParseResponse(true).
+		SetHeader("User-Agent", "YourAppName/1.0").
+		Get(url)
 
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to download image after %d attempts: %w", maxRetries, err)
+		return nil, "", fmt.Errorf("failed to download image: %w", err)
 	}
+	defer resp.RawBody().Close()
 
-	contentType := resp.Header.Get("Content-Type")
+	contentType := resp.Header().Get("Content-Type")
 	if contentType == "" {
-		contentType, err = getContentType(url)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to get content type: %w", err)
-		}
+		return nil, "", fmt.Errorf("content type is missing")
 	}
 
-	// Read the entire response body with a timeout
-	bodyReader := io.LimitReader(resp.Body, 50*1024*1024) // 50MB limit to prevent memory issues
-	imgData, err := io.ReadAll(bodyReader)
+	imgData, err := io.ReadAll(resp.RawBody())
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to read image data: %w", err)
 	}
@@ -241,7 +222,6 @@ func downloadImage(url string) (image.Image, string, error) {
 		return nil, "", fmt.Errorf("downloaded image data is empty")
 	}
 
-	// Determine the image format and decode accordingly
 	var img image.Image
 	var format string
 
