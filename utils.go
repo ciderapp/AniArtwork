@@ -200,7 +200,7 @@ func downloadImage(url string) (image.Image, string, error) {
 
 	resp, err := client.R().
 		SetDoNotParseResponse(true).
-		SetHeader("User-Agent", "YourAppName/1.0").
+		SetHeader("User-Agent", "AniArt/1.0").
 		Get(url)
 
 	if err != nil {
