@@ -24,7 +24,17 @@ func init() {
 	// Initialize logger
 	logger = logrus.New()
 	logger.SetFormatter(&logrus.TextFormatter{
-		FullTimestamp: true,
+		FullTimestamp:   true,
+		TimestampFormat: "2006-01-02 - 15:04:05",
+		DisableSorting:  true,
+		ForceQuote:      false,
+		DisableQuote:    true,
+		ForceColors:     true,
+		FieldMap: logrus.FieldMap{
+			logrus.FieldKeyTime:  "time",
+			logrus.FieldKeyLevel: "level ",
+			logrus.FieldKeyMsg:   "message",
+		},
 	})
 
 	// Get the directory of the executable
