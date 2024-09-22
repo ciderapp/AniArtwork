@@ -43,7 +43,6 @@ func init() {
 		logger.Fatalf("Error getting executable path: %v", err)
 	}
 	exPath := filepath.Dir(ex)
-	logger.Infof("Executable path: %s", exPath)
 
 	// Set up directories with absolute paths
 	cacheDir = filepath.Join(exPath, "cache")
@@ -51,6 +50,8 @@ func init() {
 	icloudArt = filepath.Join(cacheDir, "icloud-art")
 	animatedArt = filepath.Join(cacheDir, "animated-art")
 
+	logger.Info("AniArt priming up...")
+	logger.Infof("Published URI: %s", getBaseURI())
 	logger.Infof("Cache directory: %s", cacheDir)
 	logger.Infof("Artist squares directory: %s", artistSquares)
 	logger.Infof("iCloud art directory: %s", icloudArt)

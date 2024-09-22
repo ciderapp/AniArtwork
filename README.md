@@ -24,7 +24,7 @@ Response:
 {
   "key": "unique_identifier",
   "message": "GIF has been generated",
-  "url": "https://art.cider.sh/artwork/unique_identifier.gif"
+  "url": "https://example.com/artwork/unique_identifier.gif"
 }
 ```
 
@@ -47,7 +47,7 @@ Response:
 {
   "key": "unique_identifier",
   "message": "Artist square has been generated",
-  "url": "https://art.cider.sh/artwork/artist-square/unique_identifier.jpg"
+  "url": "https://example.com/artwork/artist-square/unique_identifier.jpg"
 }
 ```
 
@@ -69,7 +69,7 @@ Response:
 {
   "key": "unique_identifier",
   "message": "iCloud art has been generated",
-  "url": "https://art.cider.sh/artwork/icloud/unique_identifier.ext"
+  "url": "https://example.com/artwork/icloud/unique_identifier.ext"
 }
 ```
 
@@ -85,6 +85,7 @@ Response:
 2. Clone this repository.
 3. Install dependencies: `go mod tidy`
 4. Build the project: `go build`
+5. Create `config.yml` using format in `config.sample.yml` (If using Docker set PUBLISHED_URI env label to http://yourdomain.com)
 5. Run the server: `./AniArt`
 
 The server will start on port 3000 by default.

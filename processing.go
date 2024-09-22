@@ -14,6 +14,10 @@ import (
 	ffmpeg "github.com/u2takey/ffmpeg-go"
 )
 
+var (
+	configURI = getBaseURI()
+)
+
 /*
  * Animated Artwork Processing
  *
@@ -90,7 +94,7 @@ func generateArtwork(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"key":     key,
 			"message": "GIF already exists",
-			"url":     fmt.Sprintf("https://art.cider.sh/artwork/%s.gif", key),
+			"url":     fmt.Sprintf("%s/artwork/%s.gif", configURI, key),
 		})
 		return
 	}
@@ -111,7 +115,7 @@ func generateArtwork(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"key":     key,
 				"message": "GIF has been generated",
-				"url":     fmt.Sprintf("https://art.cider.sh/artwork/%s.gif", key),
+				"url":     fmt.Sprintf("%s/artwork/%s.gif", configURI, key),
 			})
 		}
 	case <-time.After(30 * time.Second):
@@ -149,7 +153,7 @@ func generateArtistSquare(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"key":     key,
 			"message": "Artist square already exists",
-			"url":     fmt.Sprintf("https://art.cider.sh/artwork/artist-square/%s.jpg", key),
+			"url":     fmt.Sprintf("%s/artwork/artist-square/%s.jpg", configURI, key),
 		})
 		return
 	}
@@ -173,14 +177,14 @@ func generateArtistSquare(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"key":     key,
 				"message": "Artist square has been generated",
-				"url":     fmt.Sprintf("https://art.cider.sh/artwork/artist-square/%s.jpg", key),
+				"url":     fmt.Sprintf("%s/artwork/artist-square/%s.jpg", configURI, key),
 			})
 		}
 	case <-time.After(30 * time.Second): // Adjust timeout as needed
 		c.JSON(http.StatusAccepted, gin.H{
 			"key":     key,
 			"message": "Artist square is still being processed. Please check back later.",
-			"url":     fmt.Sprintf("https://art.cider.sh/artwork/artist-square/%s.jpg", key),
+			"url":     fmt.Sprintf("%s/artwork/artist-square/%s.jpg", configURI, key),
 		})
 	}
 }
@@ -296,7 +300,7 @@ func generateICloudArt(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"key":     key,
 			"message": "iCloud art already exists",
-			"url":     fmt.Sprintf("https://art.cider.sh/artwork/icloud/%s%s", key, filepath.Ext(existingPath)),
+			"url":     fmt.Sprintf("%s/artwork/icloud/%s%s", configURI, key, filepath.Ext(existingPath)),
 		})
 		return
 	}
@@ -331,7 +335,7 @@ func generateICloudArt(c *gin.Context) {
 				c.JSON(http.StatusOK, gin.H{
 					"key":     key,
 					"message": "iCloud art has been generated",
-					"url":     fmt.Sprintf("https://art.cider.sh/artwork/icloud/%s%s", key, filepath.Ext(generatedPath)),
+					"url":     fmt.Sprintf("%s/artwork/icloud/%s%s", configURI, key, filepath.Ext(existingPath)),
 				})
 			}
 		}
@@ -339,7 +343,7 @@ func generateICloudArt(c *gin.Context) {
 		c.JSON(http.StatusAccepted, gin.H{
 			"key":     key,
 			"message": "iCloud art is still being processed. Please check back later.",
-			"url":     fmt.Sprintf("https://art.cider.sh/artwork/icloud/%s", key),
+			"url":     fmt.Sprintf("%s/artwork/icloud/%s%s", configURI, key, filepath.Ext(existingPath)),
 		})
 	}
 }
