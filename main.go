@@ -73,6 +73,7 @@ func ensureDirectories() {
 
 func main() {
 	gin.SetMode(gin.ReleaseMode)
+	gin.ForceConsoleColor()
 	r := gin.Default()
 
 	// Routes
