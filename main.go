@@ -26,13 +26,13 @@ func init() {
 	logger.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp:   true,
 		TimestampFormat: "2006-01-02 - 15:04:05",
-		DisableSorting:  true,
+		DisableSorting:  false,
 		ForceQuote:      false,
 		DisableQuote:    true,
 		ForceColors:     true,
 		FieldMap: logrus.FieldMap{
 			logrus.FieldKeyTime:  "time",
-			logrus.FieldKeyLevel: "level ",
+			logrus.FieldKeyLevel: "level",
 			logrus.FieldKeyMsg:   "message",
 		},
 	})
@@ -53,9 +53,9 @@ func init() {
 	logger.Info("AniArt priming up...")
 	logger.Infof("Published URI: %s", getBaseURI())
 	logger.Infof("Cache directory: %s", cacheDir)
-	logger.Infof("Artist squares directory: %s", artistSquares)
-	logger.Infof("iCloud art directory: %s", icloudArt)
-	logger.Infof("Animated art directory: %s", animatedArt)
+	logger.Infof("Artist Squares directory: %s", artistSquares)
+	logger.Infof("iCloud Art directory: %s", icloudArt)
+	logger.Infof("Animated Art directory: %s", animatedArt)
 
 	ffmpeg.LogCompiledCommand = false
 
