@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -208,11 +207,6 @@ func downloadImage(url string) (image.Image, string, error) {
 	}
 	defer resp.RawBody().Close()
 
-	contentType := resp.Header().Get("Content-Type")
-	if contentType == "" {
-		return nil, "", fmt.Errorf("content type is missing")
-	}
-
 	imgData, err := io.ReadAll(resp.RawBody())
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to read image data: %w", err)
@@ -222,40 +216,33 @@ func downloadImage(url string) (image.Image, string, error) {
 		return nil, "", fmt.Errorf("downloaded image data is empty")
 	}
 
-	var img image.Image
-	var format string
+	// Try to decode the image using image.Decode, which can handle multiple formats
+	img, format, err := image.Decode(bytes.NewReader(imgData))
+	if err != nil {
+		// If standard decoding fails, try specific decoders
+		decoders := map[string]func(io.Reader) (image.Image, error){
+			"jpg":  jpeg.Decode,
+			"jpeg": jpeg.Decode,
+			"png":  png.Decode,
+			"gif":  gif.Decode,
+			"webp": webp.Decode,
+		}
 
-	switch {
-	case strings.Contains(contentType, "jpeg") || strings.Contains(contentType, "jpg"):
-		img, err = jpeg.Decode(bytes.NewReader(imgData))
-		format = "jpg"
-	case strings.Contains(contentType, "png"):
-		img, err = png.Decode(bytes.NewReader(imgData))
-		format = "png"
-	case strings.Contains(contentType, "gif"):
-		img, err = gif.Decode(bytes.NewReader(imgData))
-		format = "gif"
-	case strings.Contains(contentType, "webp"):
-		img, err = webp.Decode(bytes.NewReader(imgData))
-		format = "png" // We'll save WebP images as PNG
-	default:
-		// If we can't determine the format from content type, try to decode as WebP
-		img, err = webp.Decode(bytes.NewReader(imgData))
-		if err == nil {
-			format = "png" // We'll save WebP images as PNG
-		} else {
-			// If WebP decoding fails, try to guess from the file extension
-			format = strings.TrimPrefix(path.Ext(url), ".")
-			if format == "" {
-				return nil, "", fmt.Errorf("unknown image format for URL: %s", url)
+		for ext, decoder := range decoders {
+			if img, err = decoder(bytes.NewReader(imgData)); err == nil {
+				format = ext
+				break
 			}
-			// Try to decode using the guessed format
-			img, _, err = image.Decode(bytes.NewReader(imgData))
+		}
+
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to decode image: %w", err)
 		}
 	}
 
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to decode image: %w", err)
+	// If the format is empty (shouldn't happen, but just in case), default to "png"
+	if format == "" {
+		format = "png"
 	}
 
 	return img, format, nil
