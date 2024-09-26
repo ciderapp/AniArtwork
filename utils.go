@@ -159,9 +159,9 @@ func parseStreamInfo(line string) streamInfo {
 }
 
 func isValidStream(info streamInfo) bool {
-	return !strings.Contains(info.codecs, "hvc1") &&
+	return strings.Contains(info.codecs, "hvc1") ||
 		strings.Contains(info.codecs, "avc1") &&
-		info.resolution.width >= 450
+			info.resolution.width >= 450
 }
 
 func resolveURL(base, relative string) string {
