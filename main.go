@@ -84,6 +84,9 @@ func main() {
 	r.POST("/artwork/icloud", generateICloudArt)
 	r.GET("/artwork/icloud/:key", getICloudArt)
 
+	// Experimental, WEBP support.
+	r.GET("/artwork/generate_alt", generateAltArtwork)
+
 	// Start server
 	if err := r.Run(":3000"); err != nil {
 		logger.Fatal("Failed to start server: ", err)
@@ -91,11 +94,20 @@ func main() {
 }
 
 func getArtwork(c *gin.Context) {
-	key := strings.TrimSuffix(c.Param("key"), ".gif")
+	key := strings.TrimSuffix(strings.TrimSuffix(c.Param("key"), ".gif"), ".webp")
 	gifPath := filepath.Join(animatedArt, fmt.Sprintf("%s.gif", key))
+	webpPath := filepath.Join(animatedArt, fmt.Sprintf("%s.webp", key))
 
 	if _, err := os.Stat(gifPath); os.IsNotExist(err) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "GIF not found"})
+		if _, err := os.Stat(webpPath); os.IsNotExist(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Artwork not found"})
+			return
+		} else if err != nil {
+			logger.Errorf("Error accessing WEBP for key %s: %v", key, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error accessing WEBP"})
+			return
+		}
+		c.File(webpPath)
 		return
 	} else if err != nil {
 		logger.Errorf("Error accessing GIF for key %s: %v", key, err)

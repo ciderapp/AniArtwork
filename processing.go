@@ -19,6 +19,114 @@ var (
 )
 
 /*
+ * Animated Artwork Processing (Alt, WEBP format instead of GIF, experimental.)
+ *
+ * /POST /artwork/generate_alt
+ */
+
+func generateAltArtworkAsync(urlStr, key, webpPath string) error {
+	tempWebpPath := filepath.Join(animatedArt, fmt.Sprintf("%s_temp.webp", key))
+
+	defer func() {
+		if _, err := os.Stat(tempWebpPath); err == nil {
+			logger.Infof("Cleaning up temporary file %s", tempWebpPath)
+			if err := os.Remove(tempWebpPath); err != nil {
+				logger.Errorf("Failed to remove temporary file %s: %v", tempWebpPath, err)
+			}
+		}
+	}()
+
+	// Parse the m3u8 file
+	streamURL, err := getHighQualityStreamURL(urlStr)
+	if err != nil {
+		return fmt.Errorf("failed to get high quality stream URL: %w", err)
+	}
+
+	err = ffmpeg.Input(streamURL).
+		Output(tempWebpPath, ffmpeg.KwArgs{
+			"vf":                "scale=486:-1:flags=lanczos", // No need for palette generation for WEBP
+			"loop":              "0",                          // Loop infinitely
+			"threads":           "8",
+			"preset":            "photo", // Use photo preset for better quality
+			"multiple_requests": "1",
+			"buffer_size":       "8192k",
+			"loglevel":          "panic",
+			"c:v":               "libwebp", // Use WEBP codec
+			"quality":           "80",      // WEBP quality (0-100)
+			"compression_level": "4",       // WEBP compression level (0-6)
+		}).
+		GlobalArgs("-hide_banner").
+		OverWriteOutput().
+		ErrorToStdOut().
+		Run()
+
+	if err != nil {
+		logger.Errorf("FFmpeg error: %v", err)
+		return fmt.Errorf("ffmpeg command failed: %w", err)
+	}
+
+	if fi, err := os.Stat(tempWebpPath); err != nil || fi.Size() == 0 {
+		logger.Errorf("Temporary file %s was not created or is empty", tempWebpPath)
+		return fmt.Errorf("ffmpeg failed to create output file")
+	}
+
+	if err := os.Rename(tempWebpPath, webpPath); err != nil {
+		logger.Errorf("Error renaming file: %v", err)
+		return fmt.Errorf("error renaming file: %w", err)
+	}
+
+	return nil
+}
+
+func generateAltArtwork(c *gin.Context) {
+	urlStr := c.Query("url")
+	if urlStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "URL query parameter is required"})
+		return
+	}
+
+	if err := isValidAppleURL(urlStr); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	key := generateKey(urlStr)
+	webpPath := filepath.Join(animatedArt, fmt.Sprintf("%s.webp", key))
+
+	if _, err := os.Stat(webpPath); err == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"key":     key,
+			"message": "WEBP already exists",
+			"url":     fmt.Sprintf("%s/artwork/%s.webp", configURI, key),
+		})
+		return
+	}
+
+	resultChan := make(chan error)
+
+	go func() {
+		err := generateAltArtworkAsync(urlStr, key, webpPath)
+		resultChan <- err
+	}()
+
+	select {
+	case err := <-resultChan:
+		if err != nil {
+			logger.Errorf("Failed to generate artwork: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate artwork"})
+		} else {
+			c.JSON(http.StatusOK, gin.H{
+				"key":     key,
+				"message": "WEBP has been generated",
+				"url":     fmt.Sprintf("%s/artwork/%s.webp", configURI, key),
+			})
+		}
+	case <-time.After(30 * time.Second):
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "WEBP generation timed out"})
+	}
+}
+
+/*
  * Animated Artwork Processing
  *
  * /POST /artwork/generate
